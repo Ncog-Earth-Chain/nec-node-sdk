@@ -1,6 +1,6 @@
 // Browser-specific entry point - no Node.js imports
 export { Provider } from './provider';
-export { Wallet, Signer } from './wallet';
+export { Wallet, Signer } from './wallet.browser';
 export { Contract } from './contract';
 export { InjectedProvider, ExtensionSigner } from './extension';
 

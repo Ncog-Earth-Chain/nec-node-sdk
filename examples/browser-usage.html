@@ -78,9 +78,11 @@
         <div id="wallet-output"></div>
     </div>
 
+    <!-- Load Go WebAssembly runtime BEFORE the module script -->
+    <script src="../dist/webassembly/wasm_exec.js"></script>
     <script type="module">
         // Import the SDK
-        import { loadWasm, Provider, Wallet } from './dist/index.browser.esm.js';
+        import { loadWasm, Provider, Wallet } from '../dist/index.browser.esm.js';
 
         let mlkem = null;
         let provider = null;

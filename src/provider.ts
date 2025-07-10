@@ -65,7 +65,9 @@ export class Provider {
    * @param params An array of parameters for the RPC method.
    */
   async callRpc(method: string, params: any[] = []): Promise<any> {
-    return this.rpc(method, params);
+    // Serialize all params for RPC
+    const serializedParams = params.map(p => typeof p === 'object' && p !== null ? serializeForRpc(p) : p);
+    return this.rpc(method, serializedParams);
   }
 
   // --- web3 ---
@@ -214,7 +216,7 @@ export class Provider {
    * @returns An object containing the raw signed transaction and the decoded transaction fields.
    */
   async signTransaction(txObj: any): Promise<{ raw: string; tx: any }> {
-    const rpcParams = serializeForRpc(txObj); 
+    const rpcParams = serializeForRpc(txObj);
     return this.rpc('eth_signTransaction', [rpcParams]);
   }
 
@@ -224,8 +226,7 @@ export class Provider {
    * @param obj The transaction object.
    */
   async sendTransaction(obj: any): Promise<string> {
-    const rpcParams = serializeForRpc(obj); 
-    console.log("rpcParams", rpcParams);
+    const rpcParams = serializeForRpc(obj);
     return this.rpc('eth_sendTransaction', [rpcParams]);
   }
 
@@ -244,7 +245,8 @@ export class Provider {
    * @param tag The block tag. Defaults to "latest".
    */
   async call(tx: { from?: string; to: string; gas?: string; gasPrice?: string; value?: string; data?: string; }, tag = 'latest'): Promise<string> {
-    return this.rpc('eth_call', [tx, tag]);
+    const rpcTx = serializeForRpc(tx);
+    return this.rpc('eth_call', [rpcTx, tag]);
   }
 
   /**
@@ -252,7 +254,8 @@ export class Provider {
    * @param obj The transaction object.
    */
   async estimateGas(obj: any): Promise<number> {
-    return await this.rpc('eth_estimateGas', [obj]);
+    const rpcObj = serializeForRpc(obj);
+    return await this.rpc('eth_estimateGas', [rpcObj]);
   }
 
   /**

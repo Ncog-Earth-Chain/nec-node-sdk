@@ -1,5 +1,5 @@
 import { Provider } from './provider';
-import { serializeForRpc } from './utils';
+import { serializeForRpc, normalizeResponse } from './utils';
 
 /**
  * Defines the parameters for a transaction to be sent via an extension.
@@ -85,7 +85,8 @@ export class ExtensionSigner {
       chainId: tx.chainId // Chain ID must be a hex string
     };
     const rpcParams = serializeForRpc(txParams);
-    return this.injected.request({ method: 'eth_sendTransaction', params: [rpcParams] });
+    const result = await this.injected.request({ method: 'eth_sendTransaction', params: [rpcParams] });
+    return normalizeResponse(result);
   }
 
   /**

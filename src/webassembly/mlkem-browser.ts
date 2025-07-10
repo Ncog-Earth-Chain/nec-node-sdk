@@ -81,8 +81,8 @@ export async function loadWasm(): Promise<MlKemBrowser> {
     throw new Error('Go WebAssembly runtime not loaded. Please include wasm_exec.js before using this module.');
   }
 
-  // Load the WASM file
-  const wasmResponse = await fetch('./webassembly/main.wasm');
+  // For Vite and static servers, main.wasm should be in public/webassembly/
+  const wasmResponse = await fetch('/webassembly/main.wasm');
   const wasmBuffer = await wasmResponse.arrayBuffer();
 
   const go = new Go();

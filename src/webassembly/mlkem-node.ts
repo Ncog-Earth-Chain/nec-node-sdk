@@ -183,7 +183,7 @@ export async function loadWasm(): Promise<MlKemNode> {
       }
       const result = globalThis.privateKeyToWalletAddress(privateKey);
       if (result?.error) throw new Error(`Go privateKeyToAddress failed: ${result.error}`);
-      if (typeof result.address !== 'string') {
+      if (typeof result?.address !== 'string') {
         console.error('Unexpected address result:', result);
         throw new Error('Invalid result from privateKeyToWalletAddress');
       }

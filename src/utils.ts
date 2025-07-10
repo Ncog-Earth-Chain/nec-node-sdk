@@ -82,14 +82,17 @@ export function serializeForRpc(payload: Record<string, any>): Record<string, an
 /**
  * Walk and normalize JSON-RPC response (hex → decimal or Wei)
  */
-export function normalizeResponse(resp: Record<string, any>): Record<string, any> | any {
+export function normalizeResponse(resp: Record<string, any> | any ): Record<string, any> | any {
   const out: Record<string, any> = {};
+
   if (resp === null) return out;
 
   if (typeof resp == 'boolean') return resp;
 
   if (typeof resp === 'string') {
-      return hexToDecimalString(resp);
+    // If it's a likely hash/address, return as is
+    if (/^0x[a-fA-F0-9]{40,}$/.test(resp)) return resp;
+    return hexToDecimalString(resp);
   }
 
   if (Array.isArray(resp)) {
@@ -98,8 +101,8 @@ export function normalizeResponse(resp: Record<string, any>): Record<string, any
 
   for (const [key, val] of Object.entries(resp)) {
     if (typeof val === 'string' && val.startsWith('0x')) {
-      // Leave address-like fields untouched
-      if ([ 'address', 'hash', 'from', 'to' ].includes(key)) {
+      // Leave address-like and hash-like fields untouched
+      if ([ 'address', 'hash', 'from', 'to', 'transactionHash', 'blockHash', 'contractAddress' ].includes(key)) {
         out[key] = val;
       } else {
         out[key] = normalizeHexField(key, val);

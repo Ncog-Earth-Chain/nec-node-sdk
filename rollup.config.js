@@ -12,13 +12,16 @@ const externals = [
   ...require('module').builtinModules,
 ];
 
+// Custom warning handler to suppress unresolved node built-in warnings in browser builds
 function onWarn(warning, warn) {
+  // Suppress unresolved dependency warnings for node built-ins in browser build
+  if (warning.code === 'UNRESOLVED_IMPORT' && /node:(module|crypto)/.test(warning.source)) return;
   if (warning.code === 'THIS_IS_UNDEFINED') return;
   warn(warning);
 }
 
 export default [
-  // ————————————— CJS (Node) —————————————
+  // ———————— CJS (Node) ————————
   {
     input: 'src/index.ts',
     external: externals,
@@ -37,7 +40,7 @@ export default [
     },
   },
 
-  // ————————————— ESM (Node & Bundlers) —————————————
+  // ———————— ESM (Node & Bundlers) ————————
   {
     input: 'src/index.ts',
     external: externals,
@@ -55,7 +58,7 @@ export default [
     },
   },
 
-  // ————————————— UMD (Browser) —————————————
+  // ———————— UMD (Browser) ————————
   {
     input: 'src/index.browser.ts',
     onwarn: onWarn,
@@ -78,7 +81,7 @@ export default [
     },
   },
 
-  // ————————————— Browser ESM —————————————
+  // ———————— Browser ESM ————————
   {
     input: 'src/index.browser.ts',
     onwarn: onWarn,

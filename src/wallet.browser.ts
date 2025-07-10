@@ -1,5 +1,5 @@
-// src/wallet.ts
-import { loadWasm, type MlKem } from './webassembly/mlkem';
+// src/wallet.browser.ts
+import { loadWasm, type MlKemBrowser } from './webassembly/mlkem-browser';
 import type { Provider } from './provider';
 import { serializeForRpc, normalizeResponse } from './utils.js';
 
@@ -14,11 +14,11 @@ export interface TxParams {
 }
 
 export class Wallet {
-  private mlkem: MlKem;
+  private mlkem: MlKemBrowser;
   public privateKey: string;
   public readonly address: string;
 
-  private constructor(mlkem: MlKem, privateKey: string) {
+  private constructor(mlkem: MlKemBrowser, privateKey: string) {
     this.mlkem = mlkem;
     this.privateKey = privateKey;
     this.address = this.mlkem.privateKeyToAddress(privateKey);
@@ -69,4 +69,4 @@ export class Signer {
     }
     return normalizeResponse(sendResponse.result) as string; // returns tx hash
   }
-}
+} 

@@ -1,5 +1,14 @@
 // Unified MLKEM interface for both Node.js and browser environments
 
+export class WasmError extends Error {
+  public readonly context?: any;
+  constructor(message: string, context?: any) {
+    super(`WASM Error: ${message}`);
+    this.name = 'WasmError';
+    this.context = context;
+  }
+}
+
 export interface MlKem {
   /**
    * Generate a new keypair.
@@ -65,7 +74,7 @@ export async function loadWasm(): Promise<MlKem> {
     const { loadWasm: loadBrowserWasm } = await import('./mlkem-browser');
     return await loadBrowserWasm();
   } else {
-    throw new Error('Unsupported environment. This package requires Node.js or a browser environment.');
+    throw new WasmError('Unsupported environment. This package requires Node.js or a browser environment.', { env: { isNode, isBrowser } });
   }
 }
 
@@ -74,12 +83,12 @@ export async function loadWasm(): Promise<MlKem> {
  */
 export async function loadWasmFromBuffer(wasmBuffer: ArrayBuffer): Promise<MlKem> {
   if (isNode) {
-    throw new Error('loadWasmFromBuffer is not supported in Node.js environment. Use loadWasm() instead.');
+    throw new WasmError('loadWasmFromBuffer is not supported in Node.js environment. Use loadWasm() instead.', { env: 'node' });
   } else if (isBrowser) {
     const { loadWasmFromBuffer: loadBrowserWasmFromBuffer } = await import('./mlkem-browser');
     return await loadBrowserWasmFromBuffer(wasmBuffer);
   } else {
-    throw new Error('Unsupported environment. This package requires Node.js or a browser environment.');
+    throw new WasmError('Unsupported environment. This package requires Node.js or a browser environment.', { env: { isNode, isBrowser } });
   }
 }
 
