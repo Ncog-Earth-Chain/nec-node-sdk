@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCOG SDK Browser Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .success {
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <h1>NCOG SDK Browser Example</h1>
+    
+    <div class="container">
+        <h2>Setup Instructions</h2>
+        <p>To use the NCOG SDK in a browser:</p>
+        <ol>
+            <li>Include the Go WebAssembly runtime: <code>&lt;script src="wasm_exec.js"&gt;&lt;/script&gt;</code></li>
+            <li>Import the SDK: <code>import { loadWasm } from '../dist/index.browser.esm.js'</code></li>
+            <li>Initialize the WASM module: <code>const mlkem = await loadWasm()</code></li>
+        </ol>
+    </div>
+
+    <div class="container">
+        <h2>MLKEM Operations</h2>
+        <button onclick="generateKeys()">Generate Keypair</button>
+        <button onclick="encryptMessage()">Encrypt Message</button>
+        <button onclick="decryptMessage()">Decrypt Message</button>
+        <button onclick="symmetricEncrypt()">Symmetric Encrypt</button>
+        <button onclick="symmetricDecrypt()">Symmetric Decrypt</button>
+        <button onclick="deriveAddress()">Derive Address</button>
+        
+        <div id="output"></div>
+    </div>
+
+    <div class="container">
+        <h2>Provider and Wallet Operations</h2>
+        <button onclick="connectProvider()">Connect Provider</button>
+        <button onclick="createWallet()">Create Wallet</button>
+        <button onclick="getBalance()">Get Balance</button>
+        
+        <div id="wallet-output"></div>
+    </div>
+
+    <script type="module">
+        // Import the SDK
+        import { loadWasm, Provider, Wallet } from './dist/index.browser.esm.js';
+
+        let mlkem = null;
+        let provider = null;
+        let wallet = null;
+        let keypair = null;
+
+        // Initialize MLKEM
+        async function initMlkem() {
+            try {
+                mlkem = await loadWasm();
+                console.log('MLKEM initialized successfully');
+                return true;
+            } catch (error) {
+                console.error('Failed to initialize MLKEM:', error);
+                return false;
+            }
+        }
+
+        // Generate keypair
+        window.generateKeys = async function() {
+            if (!mlkem) {
+                if (!(await initMlkem())) {
+                    showOutput('Failed to initialize MLKEM', 'error');
+                    return;
+                }
+            }
+
+            try {
+                keypair = await mlkem.keyGen();
+                showOutput(`Generated keypair:\nPublic Key: ${keypair.pubKey.substring(0, 50)}...\nPrivate Key: ${keypair.privKey.substring(0, 50)}...`, 'success');
+            } catch (error) {
+                showOutput(`Error generating keys: ${error.message}`, 'error');
+            }
+        };
+
+        // Encrypt message
+        window.encryptMessage = async function() {
+            if (!mlkem) {
+                showOutput('Please initialize MLKEM first', 'error');
+                return;
+            }
+
+            if (!keypair) {
+                showOutput('Please generate a keypair first', 'error');
+                return;
+            }
+
+            try {
+                const message = "Hello, NCOG!";
+                const result = await mlkem.encrypt(keypair.pubKey, message);
+                showOutput(`Encrypted message:\nEncrypted: ${result.encryptedData.substring(0, 50)}...\nVersion: ${result.version}`, 'success');
+            } catch (error) {
+                showOutput(`Error encrypting message: ${error.message}`, 'error');
+            }
+        };
+
+        // Decrypt message
+        window.decryptMessage = async function() {
+            if (!mlkem) {
+                showOutput('Please initialize MLKEM first', 'error');
+                return;
+            }
+
+            if (!keypair) {
+                showOutput('Please generate a keypair first', 'error');
+                return;
+            }
+
+            try {
+                const message = "Hello, NCOG!";
+                const encrypted = await mlkem.encrypt(keypair.pubKey, message);
+                const decrypted = await mlkem.decrypt(keypair.privKey, encrypted.encryptedData, encrypted.version);
+                showOutput(`Decrypted message: ${decrypted}`, 'success');
+            } catch (error) {
+                showOutput(`Error decrypting message: ${error.message}`, 'error');
+            }
+        };
+
+        // Symmetric encrypt
+        window.symmetricEncrypt = async function() {
+            if (!mlkem) {
+                showOutput('Please initialize MLKEM first', 'error');
+                return;
+            }
+
+            try {
+                const ssKey = "shared-secret-key-32-bytes-long";
+                const message = "Symmetric encryption test";
+                const result = await mlkem.symEncrypt(ssKey, message);
+                showOutput(`Symmetric encrypted:\nEncrypted: ${result.encryptedData.substring(0, 50)}...\nVersion: ${result.version}`, 'success');
+            } catch (error) {
+                showOutput(`Error symmetric encrypting: ${error.message}`, 'error');
+            }
+        };
+
+        // Symmetric decrypt
+        window.symmetricDecrypt = async function() {
+            if (!mlkem) {
+                showOutput('Please initialize MLKEM first', 'error');
+                return;
+            }
+
+            try {
+                const ssKey = "shared-secret-key-32-bytes-long";
+                const message = "Symmetric decryption test";
+                const encrypted = await mlkem.symEncrypt(ssKey, message);
+                const decrypted = await mlkem.symDecrypt(ssKey, encrypted.encryptedData, encrypted.version);
+                showOutput(`Symmetric decrypted: ${decrypted}`, 'success');
+            } catch (error) {
+                showOutput(`Error symmetric decrypting: ${error.message}`, 'error');
+            }
+        };
+
+        // Derive address
+        window.deriveAddress = async function() {
+            if (!mlkem) {
+                showOutput('Please initialize MLKEM first', 'error');
+                return;
+            }
+
+            try {
+                const privateKey = "example-private-key-32-bytes-long";
+                const address = mlkem.privateKeyToAddress(privateKey);
+                showOutput(`Derived address: ${address}`, 'success');
+            } catch (error) {
+                showOutput(`Error deriving address: ${error.message}`, 'error');
+            }
+        };
+
+        // Provider operations
+        window.connectProvider = async function() {
+            try {
+                provider = new Provider('https://rpc.example.com');
+                showWalletOutput('Provider connected successfully', 'success');
+            } catch (error) {
+                showWalletOutput(`Error connecting provider: ${error.message}`, 'error');
+            }
+        };
+
+        window.createWallet = async function() {
+            try {
+                wallet = new Wallet();
+                showWalletOutput(`Wallet created: ${wallet.address}`, 'success');
+            } catch (error) {
+                showWalletOutput(`Error creating wallet: ${error.message}`, 'error');
+            }
+        };
+
+        window.getBalance = async function() {
+            if (!provider || !wallet) {
+                showWalletOutput('Please connect provider and create wallet first', 'error');
+                return;
+            }
+
+            try {
+                const balance = await provider.getBalance(wallet.address);
+                showWalletOutput(`Balance: ${balance}`, 'success');
+            } catch (error) {
+                showWalletOutput(`Error getting balance: ${error.message}`, 'error');
+            }
+        };
+
+        function showOutput(message, type = 'info') {
+            const output = document.getElementById('output');
+            output.innerHTML = `<pre class="${type}">${message}</pre>`;
+        }
+
+        function showWalletOutput(message, type = 'info') {
+            const output = document.getElementById('wallet-output');
+            output.innerHTML = `<pre class="${type}">${message}</pre>`;
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('NCOG SDK Browser Example loaded');
+            showOutput('Ready to use NCOG SDK. Click buttons above to test functionality.');
+        });
+    </script>
+</body>
+</html> 

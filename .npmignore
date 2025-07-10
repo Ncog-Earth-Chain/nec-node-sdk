@@ -1,0 +1,6 @@
+/src
+/.github
+/test
+/tsconfig.json
+/jest.config.js
+/package-lock.json
