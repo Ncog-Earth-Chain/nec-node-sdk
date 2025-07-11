@@ -4,6 +4,7 @@ import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
 import typescript from 'rollup-plugin-typescript2';
 import polyfill from 'rollup-plugin-polyfill-node';
+import url from '@rollup/plugin-url';
 import pkg from './package.json';
 
 const externals = [
@@ -68,6 +69,7 @@ export default [
       commonjs({ transformMixedEsModules: true }),
       json(),
       typescript(),
+      url({ include: ['**/*.wasm'] })
     ],
     output: {
       file: 'dist/index.umd.js',
@@ -91,6 +93,7 @@ export default [
       commonjs({ transformMixedEsModules: true }),
       json(),
       typescript(),
+      url({ include: ['**/*.wasm'] })
     ],
     output: {
       file: 'dist/index.browser.esm.js',

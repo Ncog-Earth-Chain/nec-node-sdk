@@ -1,5 +1,5 @@
 // src/wallet.ts
-import { loadWasm, type MlKem } from './webassembly/mlkem';
+import { loadWasm } from './webassembly/mlkem';
 import type { Provider } from './provider';
 import { serializeForRpc, normalizeResponse } from './utils.js';
 
@@ -13,8 +13,18 @@ export interface TxParams {
   chainId: number;
 }
 
+export interface MlKem {
+  keyGen(): Promise<{ pubKey: string; privKey: string }>;
+  encrypt(pubKey: string, message: string): Promise<{ encryptedData: string; version: string }>;
+  decrypt(privKey: string, encryptedData: string, version: string): Promise<string>;
+  symEncrypt(ssKey: string, message: string): Promise<{ encryptedData: string; version: string }>;
+  symDecrypt(ssKey: string, encryptedData: string, version: string): Promise<string>;
+  privateKeyToAddress(privateKey: string): string;
+  signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
+}
+
 export class Wallet {
-  private mlkem: MlKem;
+  public mlkem: MlKem;
   public privateKey: string;
   public readonly address: string;
 
@@ -46,21 +56,27 @@ export class Signer {
   }
 
   async sendTransaction(txParams: TxParams): Promise<string> {
-    // 1) sign the transaction via provider RPC
-    const rpcParams = serializeForRpc(txParams);
-    const signResponse = await this.provider.callRpc('eth_signTransaction', [rpcParams]);
+    // const rpcParams = serializeForRpc(txParams);
 
-    if (!signResponse.result?.raw) {
-      throw new Error(
-        'eth_signTransaction failed: ' +
-        JSON.stringify(signResponse.error || signResponse)
-      );
+    console.log("TxParams", txParams)
+
+    if (!txParams?.chainId) {
+      txParams.chainId = await this.provider.getChainId();
     }
-    const rawSigned: string = signResponse.result.raw;
 
-    // 2) broadcast the signed transaction
+    if ( !txParams.gasLimit || !txParams.gasPrice || !txParams?.nonce || !txParams?.to) {
+      throw new Error('Missing required transaction parameters: gasLimit, gasPrice, nonce, to');
+    }
+    
+    const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(txParams, this.wallet.privateKey);
+    if (!rawSignedObj || (!rawSignedObj.raw && !rawSignedObj.rawTransaction)) {
+      throw new Error('signTransactionMLDSA87 failed: ' + JSON.stringify(rawSignedObj));
+    }
+    const rawSigned: string = rawSignedObj.raw || rawSignedObj.rawTransaction;
+    
+    console.log("rawSigned", rawSigned);
+
     const sendResponse = await this.provider.callRpc('eth_sendRawTransaction', [rawSigned]);
-
     if (sendResponse.error) {
       throw new Error(
         'eth_sendRawTransaction failed: ' +

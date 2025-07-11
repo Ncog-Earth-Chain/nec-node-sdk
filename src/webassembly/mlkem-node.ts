@@ -18,6 +18,7 @@ declare global {
   var symEncrypt: (ssKey: string, message: string) => any;
   var symDecrypt: (ssKey: string, encryptedData: string, version: string) => any;
   var privateKeyToWalletAddress: (pk: string) => any;
+  var signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
   var fs: typeof import('fs');
   interface Crypto {
     getRandomValues(array: Uint8Array): void;
@@ -84,6 +85,12 @@ export interface MlKemNode {
    * Derive an EVM-style address (hex) from a raw private-key string.
    */
   privateKeyToAddress(privateKey: string): string;
+
+  /**
+   * Sign a transaction object with the given private key.
+   */
+  signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
+
 }
 
 /**
@@ -189,5 +196,18 @@ export async function loadWasm(): Promise<MlKemNode> {
       }
       return result.address;
     },
+
+    signTransactionMLDSA87:(TxObject : any, privateKeyHex : string) => {
+      if (typeof globalThis.signTransactionMLDSA87 !== 'function') {
+        throw new Error('signTransactionMLDSA87 not found on globalThis');
+      }
+      const result = globalThis.signTransactionMLDSA87(TxObject, privateKeyHex );
+      if (result?.error) throw new Error(`Go signTransactionMLDSA87 failed: ${result.error}`);
+      if (typeof result !== 'object') {
+        console.error('Unexpected result:', result);
+        throw new Error('Invalid result from signTransactionMLDSA87');
+      }
+      return result;
+    }
   };
 }

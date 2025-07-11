@@ -1,3 +1,10 @@
+// WARNING: This file is for browser builds only.
+// The WASM import below will break Node builds.
+// Node builds should use mlkem-node.ts, which does not import WASM as a module.
+//
+// If you see errors about importing .wasm or ?url in Node, you are importing the wrong file.
+//
+// See package.json "browser" field and mlkem.ts for environment selection logic.
 // Browser-compatible MLKEM WebAssembly loader
 
 // --- Polyfill for Web Crypto API ---
@@ -9,6 +16,7 @@ declare global {
   var symEncrypt: (ssKey: string, message: string) => any;
   var symDecrypt: (ssKey: string, encryptedData: string, version: string) => any;
   var privateKeyToWalletAddress: (pk: string) => any;
+  var signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
   interface Crypto {
     getRandomValues(array: Uint8Array): void;
   }
@@ -20,6 +28,15 @@ if (typeof globalThis.crypto === 'undefined') {
 }
 
 // --- End Polyfill ---
+
+function getWasmUrl(filename = 'main.wasm') {
+  // Get the current script/module URL (works for ESM modules)
+  // @ts-ignore
+  const scriptUrl = import.meta.url || (document.currentScript && document.currentScript.src);
+  if (!scriptUrl) throw new Error('Cannot determine script URL for WASM loading');
+  // If your WASM is in a subfolder next to the JS bundle:
+  return new URL(`./webassembly/${filename}`, scriptUrl).toString();
+}
 
 /**
  * Public interface for MLKEM operations in browser
@@ -69,21 +86,45 @@ export interface MlKemBrowser {
    * Derive an EVM-style address (hex) from a raw private-key string.
    */
   privateKeyToAddress(privateKey: string): string;
+
+  /**
+   * Sign a transaction object with the given private key.
+   */
+  signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
 }
 
 /**
  * Load and initialize the MLKEM Go WebAssembly module in browser.
+ * @param wasmPath Optional override for the WASM file URL.
  */
-export async function loadWasm(): Promise<MlKemBrowser> {
-  // Load the Go WebAssembly support code
-  // In browser, this should be loaded via script tag or dynamic import
+export async function loadWasm(wasmPath?: string): Promise<MlKemBrowser> {
   if (typeof globalThis.Go === 'undefined') {
     throw new Error('Go WebAssembly runtime not loaded. Please include wasm_exec.js before using this module.');
   }
 
-  // For Vite and static servers, main.wasm should be in public/webassembly/
-  const wasmResponse = await fetch('/webassembly/main.wasm');
-  const wasmBuffer = await wasmResponse.arrayBuffer();
+  // Try multiple candidate locations for the WASM file
+  const candidates = [
+    wasmPath,
+    '/node_modules/ncog/dist/webassembly/main.wasm', // fallback to package
+    getWasmUrl(), // dynamic relative to bundle
+  ].filter((v): v is string => typeof v === 'string' && !!v);
+
+  let wasmBuffer: ArrayBuffer | undefined;
+  let lastError: any;
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url);
+      if (resp.ok) {
+        wasmBuffer = await resp.arrayBuffer();
+        break;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (!wasmBuffer) {
+    throw lastError || new Error('Could not load WASM file from any known location');
+  }
 
   const go = new Go();
   const importObject = go.importObject;
@@ -181,6 +222,20 @@ export async function loadWasm(): Promise<MlKemBrowser> {
       }
       return result.address;
     },
+
+    signTransactionMLDSA87:(TxObject : any, privateKeyHex : string) => {
+      if (typeof globalThis.signTransactionMLDSA87 !== 'function') {
+        throw new Error('signTransactionMLDSA87 not found on globalThis');
+      }
+      const result = globalThis.signTransactionMLDSA87(TxObject, privateKeyHex );
+      if (result?.error) throw new Error(`Go signTransactionMLDSA87 failed: ${result.error}`);
+      if (typeof result !== 'object') {
+        console.error('Unexpected result:', result);
+        throw new Error('Invalid result from signTransactionMLDSA87');
+      }
+      return result;
+    }
+
   };
 }
 
@@ -278,5 +333,17 @@ export async function loadWasmFromBuffer(wasmBuffer: ArrayBuffer): Promise<MlKem
       }
       return result.address;
     },
+
+    signTransactionMLDSA87:(TxObject : any, privateKeyHex : string) => {
+      if (typeof globalThis.signTransactionMLDSA87 !== 'function') {
+        throw new Error('signTransactionMLDSA87 not found on globalThis');
+      }
+      const result = globalThis.signTransactionMLDSA87(TxObject, privateKeyHex);
+      if (result?.error) throw new Error(`Go signTransactionMLDSA87 failed: ${result.error}`);
+      if (typeof result !== 'object') {
+        throw new Error('Invalid result from signTransactionMLDSA87');
+      }
+      return result;
+    }
   };
 } 

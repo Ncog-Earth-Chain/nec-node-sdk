@@ -14,7 +14,7 @@ export interface TxParams {
 }
 
 export class Wallet {
-  private mlkem: MlKemBrowser;
+  public mlkem: MlKemBrowser;
   public privateKey: string;
   public readonly address: string;
 
@@ -46,21 +46,13 @@ export class Signer {
   }
 
   async sendTransaction(txParams: TxParams): Promise<string> {
-    // 1) sign the transaction via provider RPC
     const rpcParams = serializeForRpc(txParams);
-    const signResponse = await this.provider.callRpc('eth_signTransaction', [rpcParams]);
-
-    if (!signResponse.result?.raw) {
-      throw new Error(
-        'eth_signTransaction failed: ' +
-        JSON.stringify(signResponse.error || signResponse)
-      );
+    const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(rpcParams, this.wallet.privateKey);
+    if (!rawSignedObj || (!rawSignedObj.raw && !rawSignedObj.rawTransaction)) {
+      throw new Error('signTransactionMLDSA87 failed: ' + JSON.stringify(rawSignedObj));
     }
-    const rawSigned: string = signResponse.result.raw;
-
-    // 2) broadcast the signed transaction
+    const rawSigned: string = rawSignedObj.raw || rawSignedObj.rawTransaction;
     const sendResponse = await this.provider.callRpc('eth_sendRawTransaction', [rawSigned]);
-
     if (sendResponse.error) {
       throw new Error(
         'eth_sendRawTransaction failed: ' +

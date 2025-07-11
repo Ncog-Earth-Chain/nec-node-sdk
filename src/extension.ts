@@ -59,37 +59,6 @@ export class ExtensionSigner {
   }
 
   /**
-   * Signs and sends a transaction through the extension wallet.
-   * The wallet will prompt the user for confirmation.
-   * @param tx The transaction parameters.
-   * @returns A promise that resolves to the transaction hash.
-   */
-  async sendTransaction(tx: TxParams): Promise<string> {
-    const from = await this.getAddress();
-    if (!from) {
-      throw new Error("Cannot send transaction: no address is selected in the wallet.");
-    }
-
-    // Ensure the chainId is included in the transaction parameters
-    if (!tx.chainId) {
-      tx.chainId = await this.provider.getChainId();
-    }
-
-    const txParams = {
-      from,
-      to: tx.to,
-      value: tx.value,
-      data: tx.data,
-      gas: tx.gasLimit, // Note: some wallets use 'gas' and some use 'gasLimit'
-      gasPrice: tx.gasPrice,
-      chainId: tx.chainId // Chain ID must be a hex string
-    };
-    const rpcParams = serializeForRpc(txParams);
-    const result = await this.injected.request({ method: 'eth_sendTransaction', params: [rpcParams] });
-    return normalizeResponse(result);
-  }
-
-  /**
    * Registers a listener for an event from the wallet (e.g., 'accountsChanged', 'chainChanged').
    * @param event The name of the event.
    * @param listener The callback function to execute when the event fires.
@@ -100,5 +69,48 @@ export class ExtensionSigner {
     } else {
       console.warn('The injected wallet provider does not support event listening via .on()');
     }
+  }
+
+  /**
+ * Signs and sends a transaction through the extension wallet.
+ * The wallet will prompt the user for confirmation.
+ * @param tx The transaction parameters.
+ * @returns A promise that resolves to the transaction hash.
+ */
+  async sendTransaction(tx: TxParams): Promise<string> {
+    const from = await this.getAddress();
+    if (!from) {
+      throw new Error("Cannot send transaction: no address is selected in the wallet.");
+    }
+    if (!tx.chainId) {
+      tx.chainId = await this.provider.getChainId();
+    }
+    const txParams = {
+      from,
+      to: tx.to,
+      value: tx.value,
+      data: tx.data,
+      gas: tx.gasLimit,
+      gasPrice: tx.gasPrice,
+      chainId: tx.chainId
+    };
+    const rpcParams = serializeForRpc(txParams);
+
+    // Try MLDSA87 signing if supported
+    if (typeof this.injected.request === 'function') {
+      try {
+        const signResult = await this.injected.request({ method: 'eth_signTransactionMLDSA87', params: [rpcParams] });
+        const rawSigned = signResult.raw || signResult.rawTransaction;
+        if (!rawSigned) throw new Error('No raw transaction returned from MLDSA87 signing.');
+        const sendResponse = await this.provider.callRpc('eth_sendRawTransaction', [rawSigned]);
+        if (sendResponse.error) {
+          throw new Error('eth_sendRawTransaction failed: ' + JSON.stringify(sendResponse.error));
+        }
+        return normalizeResponse(sendResponse.result) as string;
+      } catch (err) {
+        throw new Error('Extension does not support MLDSA87 signing or signing failed: ' + err);
+      }
+    }
+    throw new Error('Injected provider does not support MLDSA87 signing.');
   }
 }

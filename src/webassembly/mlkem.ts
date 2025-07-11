@@ -54,6 +54,7 @@ export interface MlKem {
    * Derive an EVM-style address (hex) from a raw private-key string.
    */
   privateKeyToAddress(privateKey: string): string;
+  signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
 }
 
 // Environment detection

@@ -10,6 +10,71 @@ export interface ISigner {
   getAddress?(): Promise<string>;
 }
 
+function mergeArrayAndKeys(decoded: any, outputs: ReadonlyArray<any>): any {
+  // If outputs are named, merge both index and key access
+  if (outputs.length > 0 && outputs.every(o => o.name)) {
+    const result: any = {};
+    outputs.forEach((o, i) => {
+      result[i] = decoded[i];
+      if (o.name) result[o.name] = decoded[i];
+    });
+    // If decoded is a Proxy/Result, also copy any extra properties
+    for (const key in decoded) {
+      if (!result.hasOwnProperty(key)) {
+        result[key] = decoded[key];
+      }
+    }
+    return result;
+  }
+  // If only one output, return it directly
+  if (decoded.length === 1) {
+    return decoded[0];
+  }
+  // Otherwise, return as array
+  return Array.from(decoded);
+}
+
+/**
+ * Recursively convert ethers.js Result/Proxy (including nested arrays/structs) to plain objects using ABI outputs.
+ * If outputs are provided, use them to map arrays/tuples to named objects.
+ */
+function toPlainObject(result: any, outputs?: any): any {
+  // If outputs is an array (for tuple[] or array of structs)
+  if (Array.isArray(result) && outputs && outputs.baseType === 'array' && outputs.arrayChildren) {
+    // Map each element using the tuple definition
+    return result.map((item: any) => toPlainObject(item, outputs.arrayChildren));
+  }
+
+  // If outputs is a tuple (struct)
+  if (Array.isArray(result) && outputs && outputs.baseType === 'tuple' && Array.isArray(outputs.components)) {
+    const obj: any = {};
+    outputs.components.forEach((comp: any, i: number) => {
+      obj[comp.name] = toPlainObject(result[i], comp);
+    });
+    return obj;
+  }
+  // If result is an array but no ABI info, just map recursively
+  if (Array.isArray(result)) {
+    return result.map((item: any) => toPlainObject(item));
+  }
+
+  // If result is an object (ethers.js Result/Proxy)
+  if (result && typeof result === 'object') {
+    const obj: any = {};
+    for (const key in result) {
+      if (
+        Object.prototype.hasOwnProperty.call(result, key) &&
+        isNaN(Number(key)) &&
+        typeof result[key] !== 'function'
+      ) {
+        obj[key] = toPlainObject(result[key]);
+      }
+    }
+    return Object.keys(obj).length ? obj : result;
+  }
+  return result;
+}
+
 /**
  * Represents a smart contract on the blockchain, providing methods to call and send transactions.
  * Now supports web3.js-style dynamic method calls: contract.methods.myMethod(...args).call(), .send(), .estimateGas()
@@ -51,20 +116,12 @@ export class Contract {
     const fragment = this.abiInterface.getFunction(method) as FunctionFragment;
     const outputs = fragment.outputs || [];
 
-    // If outputs are named, return a plain object with named keys
-    if (outputs.length > 0 && outputs.every(o => o.name)) {
-      const obj: any = {};
-      outputs.forEach((o, i) => {
-        obj[o.name] = decoded[i];
-      });
-      return obj;
+    // Always return as deeply plain object or array (user-readable)
+    // Use ABI outputs[0] for top-level output if present
+    if (outputs.length === 1) {
+      return toPlainObject(mergeArrayAndKeys(decoded, outputs), outputs[0]);
     }
-    // If only one output, return it directly
-    if (decoded.length === 1) {
-      return decoded[0];
-    }
-    // Otherwise, return the array
-    return decoded;
+    return toPlainObject(mergeArrayAndKeys(decoded, outputs));
   }
 
   async send(method: string, params: any[], options: Record<string, any>): Promise<string> {

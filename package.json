@@ -30,6 +30,9 @@
   ],
   "author": "developer@ncog.earth",
   "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "scripts": {
     "build": "rimraf dist && rollup -c --bundleConfigAsCjs && cpr src/webassembly dist/webassembly -o && cpr src/webassembly dist/ -o",
     "test": "jest --coverage",
@@ -44,6 +47,7 @@
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-url": "^8.0.2",
     "@types/jest": "^29.0.0",
     "@typescript-eslint/eslint-plugin": "^5.0.0",
     "@typescript-eslint/parser": "^5.0.0",
