@@ -19,6 +19,7 @@ declare global {
   var symDecrypt: (ssKey: string, encryptedData: string, version: string) => any;
   var privateKeyToWalletAddress: (pk: string) => any;
   var signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
+  var decodeRLPTransaction: (txHex: string) => any;
   var fs: typeof import('fs');
   interface Crypto {
     getRandomValues(array: Uint8Array): void;
@@ -90,6 +91,8 @@ export interface MlKemNode {
    * Sign a transaction object with the given private key.
    */
   signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
+
+  decodeRLPTransaction: (txHex: string) => any;
 
 }
 
@@ -208,6 +211,20 @@ export async function loadWasm(): Promise<MlKemNode> {
         throw new Error('Invalid result from signTransactionMLDSA87');
       }
       return result;
+    },
+
+    decodeRLPTransaction: (KeyHex: string) => {
+      if (typeof globalThis.decodeRLPTransaction !== 'function') {
+        throw new Error('decodeRLPTransaction not found on globalThis');
+      }
+      const result = globalThis.decodeRLPTransaction(KeyHex);
+      if (result?.error) throw new Error(`Go decodeRLPTransaction failed: ${result.error}`);
+      if (typeof result !== 'object') {
+        console.error('Unexpected result:', result);
+        throw new Error('Invalid result from decodeRLPTransaction');
+      }
+      return result;
     }
+
   };
 }

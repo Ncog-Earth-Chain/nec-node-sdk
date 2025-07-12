@@ -55,6 +55,7 @@ export interface MlKem {
    */
   privateKeyToAddress(privateKey: string): string;
   signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
+  decodeRLPTransaction: (txHex: string) => any;
 }
 
 // Environment detection

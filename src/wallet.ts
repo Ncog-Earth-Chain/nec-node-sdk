@@ -21,6 +21,7 @@ export interface MlKem {
   symDecrypt(ssKey: string, encryptedData: string, version: string): Promise<string>;
   privateKeyToAddress(privateKey: string): string;
   signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
+  decodeRLPTransaction: (txHex: string) => any;
 }
 
 export class Wallet {
@@ -73,9 +74,6 @@ export class Signer {
       throw new Error('signTransactionMLDSA87 failed: ' + JSON.stringify(rawSignedObj));
     }
     const rawSigned: string = rawSignedObj.raw || rawSignedObj.rawTransaction;
-    
-    console.log("rawSigned", rawSigned);
-
     const sendResponse = await this.provider.callRpc('eth_sendRawTransaction', [rawSigned]);
     if (sendResponse.error) {
       throw new Error(
@@ -83,6 +81,17 @@ export class Signer {
         JSON.stringify(sendResponse.error)
       );
     }
-    return normalizeResponse(sendResponse.result) as string; // returns tx hash
+    return normalizeResponse(sendResponse?.result || sendResponse) as string; // returns tx hash
+  }
+
+  async decode(rawSigned: string): Promise<any> {
+    const response = this.wallet.mlkem.decodeRLPTransaction(rawSigned);
+    if (response.error) {
+      throw new Error(
+        'eth_decodeRawTransaction failed: ' +
+        JSON.stringify(response.error)
+      );
+    }
+    return response;
   }
 }

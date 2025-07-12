@@ -1,7 +1,9 @@
 // src/utils.ts
 
-// BigInt factor for converting Ether ↔ Wei
+// BigInt factor for converting Ether ↔ Wei (18 decimals)
 const WEI_FACTOR = BigInt("1000000000000000000");
+// BigInt factor for 9 decimal places (like some tokens)
+const NINE_DECIMAL_FACTOR = BigInt("1000000000");
 
 /**
  * Convert a hex string to its decimal representation.
@@ -34,11 +36,13 @@ export function hexToDecimalString(hex: string): string | number {
 
 /**
  * Convert a hex string to a decimal-string or Wei-string if key includes "amount".
+ * Updated to support both 18 and 9 decimal places based on context.
  */
 export function normalizeHexField(key: string, hex: string): string {
   const n = BigInt(hex);
-  if (key.toLowerCase().includes("amount")) {
-    return (n * WEI_FACTOR).toString(10);
+  if (key.toLowerCase().includes("amount") || key.toLowerCase().includes("balance")) {
+    // Use 9 decimals for balance and amount fields (like ethers.utils.formatUnits(balance, 9))
+    return (n * NINE_DECIMAL_FACTOR).toString(10);
   }
   return n.toString(10);
 }
@@ -58,17 +62,35 @@ export function etherToWeiHex(value: number | string | bigint): string {
   return "0x" + wei.toString(16);
 }
 
+/**
+ * Convert a value to hex with 9 decimal places (like some tokens).
+ */
+export function valueToNineDecimalHex(value: number | string | bigint): string {
+  const scaled = BigInt(value) * NINE_DECIMAL_FACTOR;
+  return "0x" + scaled.toString(16);
+}
 
+/**
+ * Format a value with 9 decimal places (similar to ethers.utils.formatUnits).
+ */
+export function formatUnits(value: string | number | bigint, decimals: number = 9): string {
+  const bigValue = BigInt(value);
+  const factor = decimals === 9 ? NINE_DECIMAL_FACTOR : WEI_FACTOR;
+  const result = Number(bigValue) / Number(factor);
+  return result.toString();
+}
 
 /**
  * Walk and serialize all fields in TxParams for JSON-RPC
+ * Updated to use 9 decimals for balance and amount fields.
  */
 export function serializeForRpc(payload: Record<string, any>): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [key, val] of Object.entries(payload)) {
     if (typeof val === 'number' || (/^[0-9]+$/.test(val as string))) {
-      if (key === 'value' || key.toLowerCase().includes('amount')) {
-        out[key] = etherToWeiHex(val);
+      if (key === 'value' || key.toLowerCase().includes('amount') || key.toLowerCase().includes('balance')) {
+        // Use 9 decimals for balance and amount fields
+        out[key] = valueToNineDecimalHex(val);
       } else {
         out[key] = decimalToHex(val);
       }
