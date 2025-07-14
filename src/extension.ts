@@ -94,23 +94,17 @@ export class ExtensionSigner {
       gasPrice: tx.gasPrice,
       chainId: tx.chainId
     };
-    const rpcParams = serializeForRpc(txParams);
 
     // Try MLDSA87 signing if supported
     if (typeof this.injected.request === 'function') {
       try {
-        const signResult = await this.injected.request({ method: 'eth_signTransactionMLDSA87', params: [rpcParams] });
-        const rawSigned = signResult.raw || signResult.rawTransaction;
-        if (!rawSigned) throw new Error('No raw transaction returned from MLDSA87 signing.');
-        const sendResponse = await this.provider.callRpc('eth_sendRawTransaction', [rawSigned]);
-        if (sendResponse.error) {
-          throw new Error('eth_sendRawTransaction failed: ' + JSON.stringify(sendResponse.error));
-        }
-        return normalizeResponse(sendResponse.result) as string;
+        const sendResponse = await this.injected.request({ method: 'nec_sendTransaction', params: [txParams] });
+        return normalizeResponse(sendResponse.result || sendResponse) as string;
+
       } catch (err) {
-        throw new Error('Extension does not support MLDSA87 signing or signing failed: ' + err);
+        throw new Error('Extension does not sendResponse failed: ' + err);
       }
     }
-    throw new Error('Injected provider does not support MLDSA87 signing.');
+    throw new Error('Injected provider does sendResponse');
   }
 }

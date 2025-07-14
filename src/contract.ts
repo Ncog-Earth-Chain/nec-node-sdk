@@ -81,6 +81,7 @@ function toPlainObject(result: any, outputs?: any): any {
  */
 export class Contract {
   private provider: Provider;
+  private signer?: ISigner; // Add signer property
   public readonly address: string;
   public readonly abiInterface: Interface;
   public readonly methods: Record<string, (...args: any[]) => {
@@ -89,10 +90,11 @@ export class Contract {
     estimateGas: (options?: Record<string, any>) => Promise<number>;
   }> = {};
 
-  constructor(address: string, abi: any[], provider: Provider) {
+  constructor(address: string, abi: any[], provider: Provider, signer?: ISigner) {
     this.address = address;
     this.abiInterface = new Interface(abi);
     this.provider = provider;
+    this.signer = signer;
 
     for (const fragment of this.abiInterface.fragments) {
       if (fragment.type === 'function') {
@@ -111,10 +113,22 @@ export class Contract {
     const tx = { to: this.address, data, ...options };
     const result = await this.provider.call(tx, 'latest');
 
+    // Patch: If result is 0 (from hexToDecimalString), convert back to '0x' for decodeFunctionResult
+    let decodeInput = result;
+    if (typeof decodeInput === 'number' && decodeInput === 0) {
+      decodeInput = '0x';
+    }
+
     // Always decode using ethers.js for all output types
-    const decoded = this.abiInterface.decodeFunctionResult(method, result);
     const fragment = this.abiInterface.getFunction(method) as FunctionFragment;
     const outputs = fragment.outputs || [];
+
+    // If result is '0x' and outputs are expected, handle gracefully
+    if ((decodeInput === '0x' || decodeInput === '0x0' || decodeInput === '') && outputs.length > 0) {
+      return [];
+    }
+
+    const decoded = this.abiInterface.decodeFunctionResult(method, decodeInput);
 
     // Always return as deeply plain object or array (user-readable)
     // Use ABI outputs[0] for top-level output if present
@@ -127,8 +141,14 @@ export class Contract {
   async send(method: string, params: any[], options: Record<string, any>): Promise<string> {
     const data = this.abiInterface.encodeFunctionData(method, params);
     const tx = { to: this.address, data, value: '0x0', ...options };
+    // If signer is present, use it for MLDSA87 signing (wallet or extension)
+    if (this.signer) {
+      // The signer expects a TxParams object; ensure required fields are present
+      // (ExtensionSigner and Wallet.Signer both expect similar fields)
+      return this.signer.sendTransaction(tx as any);
+    }
+    // Fallback: Use provider's sendTransaction (from must be unlocked)
     const rpcTx = serializeForRpc(tx);
-    // Use provider's sendTransaction (web3js style: from must be unlocked)
     return this.provider.sendTransaction(rpcTx as { from?: string; to: string; gas?: string; gasPrice?: string; value?: string; data?: string; });
   }
 

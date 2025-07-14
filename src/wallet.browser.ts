@@ -32,6 +32,19 @@ export class Wallet {
   connect(provider: Provider): Signer {
     return new Signer(provider, this);
   }
+
+  /**
+   * Unified connect: creates a Wallet, Provider, and Signer in one call (browser version).
+   * @param hexPrivateKey The private key as a hex string.
+   * @param providerUrl The RPC URL (optional, defaults to http://localhost:8545)
+   * @returns { signer, provider, address }
+   */
+  static async connect(hexPrivateKey: string, providerUrl?: string): Promise<{ signer: Signer, provider: Provider, address: string }> {
+    const wallet = await Wallet.create(hexPrivateKey);
+    const provider = new (await import('./provider')).Provider(providerUrl || 'http://localhost:8545');
+    const signer = wallet.connect(provider);
+    return { signer, provider, address: wallet.address };
+  }
 }
 
 export class Signer {

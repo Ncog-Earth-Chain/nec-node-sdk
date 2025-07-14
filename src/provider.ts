@@ -46,10 +46,10 @@ export class Provider {
     const payload = { jsonrpc: '2.0', id: this.idCounter++, method, params };
     try {
       const { data } = await axios.post(this.url, payload);
-      if (data.error) {
-        throw new RpcError(data.error.message, data.error.code, data.error.data);
+      if (data?.error) {
+        throw new RpcError(data?.error?.message, data?.error?.code, data?.error?.data);
       }
-      return normalizeResponse(data.result);
+      return normalizeResponse(data?.result || data);
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(`RPC request failed for method "${method}": ${error.message}`);

@@ -20,6 +20,9 @@ export function hexToDecimalString(hex: string): string | number {
   // Trim whitespace and normalize case
   const raw = hex.trim().toLowerCase();
 
+  // Special case: treat '0x' as zero
+  if (raw === '0x') return 0;
+
   // Ensure 0x prefix
   const normalized = raw.startsWith('0x') ? raw : `0x${raw}`;
 
@@ -39,6 +42,8 @@ export function hexToDecimalString(hex: string): string | number {
  * Updated to support both 18 and 9 decimal places based on context.
  */
 export function normalizeHexField(key: string, hex: string): string {
+  // Treat '0x' as zero
+  if (hex === '0x') return '0';
   const n = BigInt(hex);
   if (key.toLowerCase().includes("amount") || key.toLowerCase().includes("balance")) {
     // Use 9 decimals for balance and amount fields (like ethers.utils.formatUnits(balance, 9))

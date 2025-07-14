@@ -1,12 +1,13 @@
 // src/wallet.ts
 import { loadWasm } from './webassembly/mlkem';
 import type { Provider } from './provider';
-import { serializeForRpc, normalizeResponse } from './utils.js';
+import { normalizeResponse } from './utils.js';
 
 export interface TxParams {
-  nonce: string;
+  nonce: any;
   gasPrice: string;
-  gasLimit: string;
+  gasLimit?: string;
+  gas?: string;
   to: string;
   value: string;
   data: string;
@@ -43,6 +44,19 @@ export class Wallet {
   connect(provider: Provider): Signer {
     return new Signer(provider, this);
   }
+
+  /**
+   * Unified connect: creates a Wallet, Provider, and Signer in one call.
+   * @param hexPrivateKey The private key as a hex string.
+   * @param providerUrl The RPC URL (optional, defaults to http://localhost:8545)
+   * @returns { signer, provider, address }
+   */
+  static async connect(hexPrivateKey: string, providerUrl?: string): Promise<{ signer: Signer, provider: Provider, address: string }> {
+    const wallet = await Wallet.create(hexPrivateKey);
+    const provider = new (await import('./provider')).Provider(providerUrl || 'http://localhost:8545');
+    const signer = wallet.connect(provider);
+    return { signer, provider, address: wallet.address };
+  }
 }
 
 export class Signer {
@@ -65,8 +79,12 @@ export class Signer {
       txParams.chainId = await this.provider.getChainId();
     }
 
-    if ( !txParams.gasLimit || !txParams.gasPrice || !txParams?.nonce || !txParams?.to) {
-      throw new Error('Missing required transaction parameters: gasLimit, gasPrice, nonce, to');
+    if (
+      (!txParams.gas && !txParams.gasLimit) ||
+      !txParams.gasPrice ||
+      (txParams.nonce !== undefined && txParams.nonce < 0)
+    ) {
+      throw new Error('Missing required transaction parameters: gasLimit, gasPrice, nonce');
     }
     
     const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(txParams, this.wallet.privateKey);
