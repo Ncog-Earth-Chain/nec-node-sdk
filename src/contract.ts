@@ -3,6 +3,7 @@ import { TxParams } from './extension';
 import { Interface, Fragment, FunctionFragment } from 'ethers';
 import { serializeForRpc, normalizeResponse, hexToDecimalString } from './utils';
 import axios from 'axios';
+import { Subscription } from './subscription';
 
 // Generic signer interface for extension and wallet based signers
 export interface ISigner {
@@ -10,7 +11,7 @@ export interface ISigner {
   getAddress?(): Promise<string>;
 }
 
-function mergeArrayAndKeys(decoded: any, outputs: ReadonlyArray<any>): any {
+export function mergeArrayAndKeys(decoded: any, outputs: ReadonlyArray<any>): any {
   // If outputs are named, merge both index and key access
   if (outputs.length > 0 && outputs.every(o => o.name)) {
     const result: any = {};
@@ -38,7 +39,7 @@ function mergeArrayAndKeys(decoded: any, outputs: ReadonlyArray<any>): any {
  * Recursively convert ethers.js Result/Proxy (including nested arrays/structs) to plain objects using ABI outputs.
  * If outputs are provided, use them to map arrays/tuples to named objects.
  */
-function toPlainObject(result: any, outputs?: any): any {
+export function toPlainObject(result: any, outputs?: any): any {
   // If outputs is an array (for tuple[] or array of structs)
   if (Array.isArray(result) && outputs && outputs.baseType === 'array' && outputs.arrayChildren) {
     // Map each element using the tuple definition
@@ -80,7 +81,7 @@ function toPlainObject(result: any, outputs?: any): any {
  * Now supports web3.js-style dynamic method calls: contract.methods.myMethod(...args).call(), .send(), .estimateGas()
  */
 export class Contract {
-  private provider: Provider;
+  public provider: Provider;
   private signer?: ISigner; // Add signer property
   public readonly address: string;
   public readonly abiInterface: Interface;
@@ -89,6 +90,7 @@ export class Contract {
     send: (options: Record<string, any>) => Promise<string>;
     estimateGas: (options?: Record<string, any>) => Promise<number>;
   }> = {};
+  public readonly events: Record<string, (options?: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> }) => EventStream> = {};
 
   constructor(address: string, abi: any[], provider: Provider, signer?: ISigner) {
     this.address = address;
@@ -104,6 +106,10 @@ export class Contract {
           send: (options: Record<string, any>) => this.send(methodName, args, options),
           estimateGas: (options: Record<string, any> = {}) => this.estimateGas(methodName, args, options)
         });
+      }
+      if (fragment.type === 'event') {
+        const eventName = (fragment as Fragment & { name: string }).name;
+        this.events[eventName] = (options = {}) => new EventStream(this, eventName, options);
       }
     }
   }
@@ -264,5 +270,83 @@ export class Contract {
     };
     const response = await axios.post(apiUrl, payload);
     return response.data;
+  }
+}
+
+/**
+ * EventStream provides a web3.js-compatible event stream for contract events.
+ * Usage: contract.events.MyEvent({ fromBlock, toBlock, filter }).on('data', handler)
+ */
+export class EventStream {
+  private contract: Contract;
+  private eventName: string;
+  private options: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> };
+  private subscription?: Subscription;
+  private listeners: { [event: string]: Function[] } = {};
+  private active = false;
+
+  constructor(contract: Contract, eventName: string, options: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> }) {
+    this.contract = contract;
+    this.eventName = eventName;
+    this.options = options;
+  }
+
+  on(event: 'data' | 'changed' | 'error', handler: Function): this {
+    if (!this.listeners[event]) this.listeners[event] = [];
+    this.listeners[event].push(handler);
+    if (event === 'data' && !this.active) this.start();
+    return this;
+  }
+
+  off(event: 'data' | 'changed' | 'error', handler: Function): this {
+    if (this.listeners[event]) {
+      this.listeners[event] = this.listeners[event].filter(h => h !== handler);
+    }
+    return this;
+  }
+
+  private emit(event: 'data' | 'changed' | 'error', ...args: any[]) {
+    if (this.listeners[event]) {
+      for (const handler of this.listeners[event]) handler(...args);
+    }
+  }
+
+  private async start() {
+    this.active = true;
+    const iface = this.contract.abiInterface;
+    const eventFragment = iface.getEvent(this.eventName);
+    if (!eventFragment) {
+      this.emit('error', new Error('Event fragment not found for ' + this.eventName));
+      return;
+    }
+    const { id: keccak256 } = require('ethers').utils;
+    const topic = keccak256(`event ${eventFragment.format()}`);
+    const filter = {
+      address: this.contract.address,
+      topics: [topic],
+      ...this.options.filter,
+      fromBlock: this.options.fromBlock || 'latest',
+      toBlock: this.options.toBlock || 'latest',
+    };
+    this.subscription = new Subscription((this.contract.provider as any).url.replace(/^http/, 'ws'));
+    await this.subscription.connect();
+    const subId = await this.subscription.subscribe('logs', [filter], (log: any) => {
+      try {
+        const parsed = iface.parseLog(log);
+        if (parsed) {
+          this.emit('data', { ...log, event: this.eventName, returnValues: parsed.args });
+        }
+      } catch (err) {
+        this.emit('error', err);
+      }
+    });
+  }
+
+  async stop() {
+    this.active = false;
+    if (this.subscription) {
+      await this.subscription.disconnect();
+      this.subscription = undefined;
+    }
   }
 }

@@ -144,3 +144,16 @@ export function normalizeResponse(resp: Record<string, any> | any ): Record<stri
   }
   return out;
 }
+
+/**
+ * Checks if a string is a valid Ethereum/EVM address (basic format: 0x + 40 hex chars).
+ * @param address The address string to validate.
+ * @returns true if valid, false otherwise.
+ */
+export function isValidAddress(address: string): boolean {
+  if (typeof address !== 'string') return false;
+  // Must start with 0x and be exactly 42 chars
+  if (!address.startsWith('0x') || address.length !== 42) return false;
+  // Must be all hex digits after 0x
+  return /^[0-9a-fA-F]{40}$/.test(address.slice(2));
+}

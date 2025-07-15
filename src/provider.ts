@@ -16,6 +16,9 @@ export class RpcError extends Error {
   }
 }
 
+export type ProviderRequestMiddleware = (payload: any) => Promise<any> | any;
+export type ProviderResponseMiddleware = (response: any, payload: any) => Promise<any> | any;
+
 /**
  * The Provider class is a low-level wrapper for making JSON-RPC requests to an NCOG chain node.
  * It handles request creation, error parsing, and provides convenience methods for all standard RPC calls.
@@ -23,6 +26,22 @@ export class RpcError extends Error {
 export class Provider {
   private url: string;
   private idCounter = 1;
+  private requestMiddleware: ProviderRequestMiddleware[] = [];
+  private responseMiddleware: ProviderResponseMiddleware[] = [];
+
+  /**
+   * Register a request middleware function. Called before sending each request.
+   */
+  useRequest(middleware: ProviderRequestMiddleware) {
+    this.requestMiddleware.push(middleware);
+  }
+
+  /**
+   * Register a response middleware function. Called after receiving each response.
+   */
+  useResponse(middleware: ProviderResponseMiddleware) {
+    this.responseMiddleware.push(middleware);
+  }
 
   /**
    * @param url The URL of the JSON-RPC endpoint (e.g., "http://localhost:8545").
@@ -43,19 +62,65 @@ export class Provider {
     if (!this.url) {
       throw new Error('Provider URL is not set');
     }
-    const payload = { jsonrpc: '2.0', id: this.idCounter++, method, params };
+    let payload = { jsonrpc: '2.0', id: this.idCounter++, method, params };
+    // Apply request middleware
+    for (const mw of this.requestMiddleware) {
+      payload = await mw(payload);
+    }
     try {
       const { data } = await axios.post(this.url, payload);
-      if (data?.error) {
-        throw new RpcError(data?.error?.message, data?.error?.code, data?.error?.data);
+      let response = data;
+      // Apply response middleware
+      for (const mw of this.responseMiddleware) {
+        response = await mw(response, payload);
       }
-      return normalizeResponse(data?.result || data);
+      if (response?.error) {
+        throw new RpcError(response?.error?.message, response?.error?.code, response?.error?.data);
+      }
+      return normalizeResponse(response?.result || response);
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(`RPC request failed for method "${method}": ${error.message}`);
       }
-      // Re-throw if it's already an RpcError or another type of error
       throw error;
+    }
+  }
+
+  /**
+   * Performs a batch of JSON-RPC requests. Returns an array of results/errors in the same order.
+   * @param calls Array of { method, params } objects.
+   * @returns Array of results or errors (in order).
+   */
+  async batchRpc(calls: { method: string; params?: any[] }[]): Promise<any[]> {
+    if (!this.url) {
+      throw new Error('Provider URL is not set');
+    }
+    let payloads = calls.map((call, i) => ({
+      jsonrpc: '2.0',
+      id: this.idCounter + i,
+      method: call.method,
+      params: call.params || []
+    }));
+    // Apply request middleware to each payload
+    for (const mw of this.requestMiddleware) {
+      payloads = await Promise.all(payloads.map(p => mw(p)));
+    }
+    try {
+      const { data } = await axios.post(this.url, payloads);
+      let results = Array.isArray(data) ? data : [data];
+      // Apply response middleware to each result
+      for (const mw of this.responseMiddleware) {
+        results = await Promise.all(results.map((r, i) => mw(r, payloads[i])));
+      }
+      results.sort((a, b) => a.id - b.id);
+      return results.map(res => {
+        if (res.error) {
+          return { error: res.error };
+        }
+        return normalizeResponse(res.result || res);
+      });
+    } catch (error) {
+      return calls.map(() => ({ error: (error as any).message || error }));
     }
   }
 
@@ -358,5 +423,32 @@ export class Provider {
    */
   async sendPersonalTransaction(tx: any, password: string): Promise<string> {
     return this.rpc('personal_sendTransaction', [tx, password]);
+  }
+
+  /**
+   * Resolves an ENS name to an Ethereum address using the ENS registry contract.
+   * @param ensName The ENS name to resolve (e.g., 'vitalik.eth').
+   * @param registryAddress The ENS registry contract address (optional, defaults to mainnet address).
+   * @returns The resolved Ethereum address, or null if not found.
+   */
+  async resolveEnsName(ensName: string, registryAddress = '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e'): Promise<string | null> {
+    try {
+      const { namehash } = require('ethers').utils;
+      const node = namehash(ensName);
+      // ENS registry ABI: function resolver(bytes32 node) external view returns (address)
+      const data = '0x0178b8bf' + node.replace(/^0x/, ''); // resolver(bytes32) selector + node
+      const callObj = { to: registryAddress, data };
+      const resolverAddr = await this.call(callObj);
+      if (!resolverAddr || resolverAddr === '0x' || /^0x0+$/.test(resolverAddr)) return null;
+      // ENS resolver ABI: function addr(bytes32 node) external view returns (address)
+      const addrSelector = '0x3b3b57de';
+      const data2 = addrSelector + node.replace(/^0x/, '');
+      const callObj2 = { to: resolverAddr, data: data2 };
+      const address = await this.call(callObj2);
+      if (!address || address === '0x' || /^0x0+$/.test(address)) return null;
+      return address;
+    } catch (err) {
+      return null;
+    }
   }
 }

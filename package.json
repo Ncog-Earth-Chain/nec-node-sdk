@@ -26,7 +26,17 @@
     "web3",
     "ethereum",
     "postquantum",
-    "mldsa87"
+    "cryptography",
+    "wallet",
+    "smart-contracts",
+    "nodejs",
+    "browser",
+    "wasm",
+    "mlkem",
+    "mldsa87",
+    "decentralized",
+    "dapp",
+    "earth-chain"
   ],
   "author": "developer@ncog.earth",
   "license": "MIT",
@@ -37,7 +47,7 @@
     "build": "rimraf dist && rollup -c --bundleConfigAsCjs && cpr src/webassembly dist/webassembly -o && cpr src/webassembly dist/ -o",
     "test": "jest --coverage",
     "lint": "eslint src --ext .ts",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
     "axios": "^1.4.0",
@@ -50,6 +60,7 @@
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-url": "^8.0.2",
     "@types/jest": "^29.0.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^5.0.0",
     "@typescript-eslint/parser": "^5.0.0",
     "buffer": "^6.0.3",

@@ -2,7 +2,7 @@
 
 **The all-in-one JavaScript/TypeScript SDK for building apps on the NCOG Earth Chain.**  
 Supports Node.js, browsers, React, Next.js, Vite, and more.  
-Includes post-quantum cryptography, wallet management, contract interaction, and extension wallet support.
+Includes post-quantum cryptography, wallet management, contract interaction, extension wallet support, contract deployment, and real-time subscriptions.
 
 ---
 
@@ -52,8 +52,36 @@ import { Provider, ExtensionSigner } from 'ncog';
 - **Ethereum-compatible JSON-RPC**: Connect to any NCOG or Ethereum-style node.
 - **Wallets**: Use private keys or browser extension wallets.
 - **Smart Contracts**: Deploy, call, and interact with contracts.
-- **Post-Quantum Security**: MLKEM cryptography via WebAssembly.
+- **ContractFactory**: Deploy and attach to contracts with gas estimation and constructor args.
+- **WebSocket Subscriptions**: Real-time blockchain event subscriptions (Node.js & browser).
+- **Post-Quantum Security**: MLKEM cryptography and MLDSA87 transaction signing via WebAssembly.
+- **Utilities**: Hex/decimal conversion, Ether/Wei conversion, address validation, and more.
 - **Framework Ready**: Works out-of-the-box with React, Next.js, Vite, and more.
+
+---
+
+## 🏗️ Modules Overview
+
+- **Provider**: Low-level JSON-RPC client for blockchain nodes.
+- **Wallet & Signer**: Private key management, address derivation, MLKEM crypto, and transaction signing.
+- **ExtensionSigner**: Integrates with browser extension wallets (e.g., window.ncogWallet).
+- **Contract**: Interact with smart contracts (web3.js-style dynamic methods).
+- **ContractFactory**: Deploy new contracts and attach to existing ones.
+- **Subscription**: WebSocket-based real-time event subscriptions.
+- **MLKEM**: Post-quantum cryptography (keygen, encrypt/decrypt, sign, address derivation).
+
+---
+
+## 🛠️ Utilities
+
+- `hexToDecimalString(hex)`: Convert hex to decimal string/number.
+- `decimalToHex(value)`: Convert decimal to hex (0x-prefixed).
+- `etherToWeiHex(value)`: Convert Ether to Wei (hex).
+- `valueToNineDecimalHex(value)`: Convert value to hex with 9 decimals.
+- `formatUnits(value, decimals)`: Format value with specified decimals.
+- `isValidAddress(address)`: Validate EVM address format.
+- `serializeForRpc(payload)`: Prepare transaction payload for JSON-RPC.
+- `normalizeResponse(resp)`: Normalize JSON-RPC responses (hex to decimal, etc).
 
 ---
 

@@ -1,7 +1,7 @@
 // src/wallet.ts
 import { loadWasm } from './webassembly/mlkem';
 import type { Provider } from './provider';
-import { normalizeResponse } from './utils.js';
+import { normalizeResponse } from './utils';
 
 export interface TxParams {
   nonce: any;
@@ -73,7 +73,7 @@ export class Signer {
   async sendTransaction(txParams: TxParams): Promise<string> {
     // const rpcParams = serializeForRpc(txParams);
 
-    console.log("TxParams", txParams)
+    // console.log("TxParams", txParams)
 
     if (!txParams?.chainId) {
       txParams.chainId = await this.provider.getChainId();
