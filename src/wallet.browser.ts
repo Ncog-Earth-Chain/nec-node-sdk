@@ -4,13 +4,14 @@ import type { Provider } from './provider';
 import { serializeForRpc, normalizeResponse } from './utils.js';
 
 export interface TxParams {
-  nonce: string;
+  nonce: any;
   gasPrice: string;
-  gasLimit: string;
+  gasLimit?: string;
+  gas?: string;
   to: string;
   value: string;
-  data: string;
-  chainId: number;
+  data?: string;
+  chainId?: number;
 }
 
 export class Wallet {

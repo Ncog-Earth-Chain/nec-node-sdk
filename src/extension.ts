@@ -5,13 +5,14 @@ import { serializeForRpc, normalizeResponse } from './utils';
  * Defines the parameters for a transaction to be sent via an extension.
  */
 export interface TxParams {
-  nonce?: string; // Nonce is often handled by the wallet
+  nonce: any;
   gasPrice: string;
-  gasLimit: string;
+  gasLimit?: string;
+  gas?: string;
   to: string;
   value: string;
-  data: string;
-  chainId: number;
+  data?: string;
+  chainId?: number;
 }
 
 /**

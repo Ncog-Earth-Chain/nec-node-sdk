@@ -10,8 +10,8 @@ export interface TxParams {
   gas?: string;
   to: string;
   value: string;
-  data: string;
-  chainId: number;
+  data?: string;
+  chainId?: number;
 }
 
 export interface MlKem {

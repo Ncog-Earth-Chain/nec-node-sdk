@@ -5,7 +5,7 @@
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "browser": {
-    "./src/webassembly/mlkem-node.ts": "./src/webassembly/mlkem-browser.ts",
+    "./src/webassembly/mlkem-node.ts": "./dist/webassembly/mlkem-browser.ts",
     "./dist/index.cjs.js": "./dist/index.browser.esm.js",
     "./dist/index.esm.js": "./dist/index.browser.esm.js",
     ".": "./dist/index.browser.esm.js"
@@ -47,7 +47,8 @@
     "build": "rimraf dist && rollup -c --bundleConfigAsCjs && cpr src/webassembly dist/webassembly -o && cpr src/webassembly dist/ -o",
     "test": "jest --coverage",
     "lint": "eslint src --ext .ts",
-    "prepublishOnly": "npm test && npm run build"
+    "prepublishOnly": "npm test && npm run build",
+    "postinstall": "cpx ../ncog-node-sdk/src/webassembly/wasm_exec.cjs ./public/wasm_exec.cjs"
   },
   "dependencies": {
     "axios": "^1.4.0",
@@ -65,6 +66,7 @@
     "@typescript-eslint/parser": "^5.0.0",
     "buffer": "^6.0.3",
     "cpr": "^3.0.1",
+    "cpx": "^1.5.0",
     "crypto-browserify": "^3.12.1",
     "eslint": "^8.0.0",
     "ethers": "^6.15.0",
@@ -76,5 +78,10 @@
     "stream-browserify": "^3.0.0",
     "ts-jest": "^29.0.0",
     "typescript": "^5.0.0"
-  }
+  },
+  "files": [
+    "dist/",
+    "src/webassembly/wasm_exec.cjs",
+    "src/webassembly/main.wasm"
+  ]
 }
