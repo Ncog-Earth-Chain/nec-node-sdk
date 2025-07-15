@@ -100,7 +100,7 @@ export interface MlKemBrowser {
  * Load and initialize the MLKEM Go WebAssembly module in browser.
  * @param wasmPath Optional override for the WASM file URL.
  */
-export async function loadWasm(wasmPath?: string): Promise<MlKemBrowser> {
+export async function loadWasm(wasmPath: string = '/main.wasm'): Promise<MlKemBrowser> {
   if (typeof globalThis.Go === 'undefined') {
     throw new Error('Go WebAssembly runtime not loaded. Please include wasm_exec.js before using this module.');
   }
