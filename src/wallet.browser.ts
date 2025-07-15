@@ -73,6 +73,6 @@ export class Signer {
         JSON.stringify(sendResponse.error)
       );
     }
-    return normalizeResponse(sendResponse.result) as string; // returns tx hash
+    return normalizeResponse(sendResponse.result || sendResponse ) as string; // returns tx hash
   }
 } 

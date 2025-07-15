@@ -1,7 +1,7 @@
 import { Provider } from './provider';
 import { TxParams } from './extension';
 import { Interface, Fragment, FunctionFragment } from 'ethers';
-import { serializeForRpc, normalizeResponse, hexToDecimalString } from './utils';
+import { serializeForRpc } from './utils';
 import axios from 'axios';
 import { Subscription } from './subscription';
 
