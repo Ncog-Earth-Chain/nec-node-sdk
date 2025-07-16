@@ -5,6 +5,7 @@ import { serializeForRpc, normalizeResponse } from './utils';
  * Defines the parameters for a transaction to be sent via an extension.
  */
 export interface TxParams {
+  from: string;
   nonce: any;
   gasPrice: string;
   gasLimit?: string;

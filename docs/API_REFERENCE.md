@@ -53,7 +53,6 @@ This document provides an overview of the main modules, classes, and features of
   - [Node.js Integration](NODEJS_INTEGRATION.md)
   - [NestJS Integration](NESTJS_INTEGRATION.md)
   - [Extension Wallet Integration](EXTENSION_WALLET.md)
-  - [Browser Usage](BROWSER_USAGE.md)
 
 - **Entry Point:**
   - [src/index.ts](../src/index.ts)

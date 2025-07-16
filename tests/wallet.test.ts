@@ -64,6 +64,7 @@ describe('Signer', () => {
 
   it('sends a transaction and returns tx hash', async () => {
     const txParams: TxParams = {
+      from: wallet.address,
       nonce: 1,
       gasPrice: '0x1',
       gasLimit: '0x5208',

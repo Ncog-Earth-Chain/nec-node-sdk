@@ -4,6 +4,7 @@ import type { Provider } from './provider';
 import { normalizeResponse } from './utils';
 
 export interface TxParams {
+  from: string;
   nonce: any;
   gasPrice: string;
   gasLimit?: string;

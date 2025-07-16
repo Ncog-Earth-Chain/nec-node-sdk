@@ -15,7 +15,7 @@
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ncog-Earth-Chain/ncog-sdk.git"
+    "url": "https://github.com/Ncog-Earth-Chain/ncog-node-sdk.git"
   },
   "keywords": [
     "ncog",
@@ -44,7 +44,8 @@
     "node": ">=16.0.0"
   },
   "scripts": {
-    "build": "rimraf dist && rollup -c --bundleConfigAsCjs && npx ts-node scripts/convert-to-wasm.ts src/webassembly/main.wasm src/wasm/wasm-base64.ts && cpr src/wasm dist/webassembly -o && cpr src/wasm dist/ -o ",
+    "script":"npx ts-node scripts/convert-to-wasm.ts src/webassembly/main.wasm src/wasm/wasm-base64.ts",
+    "build": "rimraf dist && npm run script && rollup -c --bundleConfigAsCjs && cpr src/wasm dist/webassembly -o && cpr src/wasm dist/ -o ",
     "test": "jest --coverage",
     "lint": "eslint src --ext .ts",
     "prepublishOnly": "npm test && npm run build"
@@ -80,6 +81,6 @@
   },
   "files": [
     "dist/",
-    "src/webassembly/main.wasm"
+    "src/webassembly/wasm-base64"
   ]
 }

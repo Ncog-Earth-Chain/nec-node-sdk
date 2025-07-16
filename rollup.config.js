@@ -100,25 +100,5 @@ export default [
       format: 'esm',
       inlineDynamicImports: true,
     },
-  },
-
-  // ———————— ESM (Preserve Modules for Deep Imports) ————————
-  {
-    input: 'src/index.ts',
-    external: externals,
-    onwarn: onWarn,
-    plugins: [
-      json(),
-      typescript({ useTsconfigDeclarationDir: true }),
-      resolve({ preferBuiltins: true }),
-      commonjs({ transformMixedEsModules: true }),
-    ],
-    output: {
-      dir: 'dist/esm',
-      format: 'esm',
-      preserveModules: true,
-      preserveModulesRoot: 'src',
-      entryFileNames: '[name].js',
-    },
-  },
+  }
 ];

@@ -658,6 +658,19 @@ function resolveWasmFile(filename: string) {
   throw new Error(`Cannot resolve wasm file: ${filename}`);
 }
 
+import { wasmBase64 } from '../webassembly/wasm-base64';
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  // Browser-only base64 decode
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 
 // --- Polyfill for Web Crypto API ---
 declare global {
@@ -752,12 +765,14 @@ export interface MlKemNode {
  * Load and initialize the MLKEM Go WebAssembly module.
  */
 export async function loadWasm(): Promise<MlKemNode> {
-  const wasmPath = resolveWasmFile('main.wasm');
-  const wasmBuffer = fs.readFileSync(wasmPath);
+  const wasmBytes = base64ToUint8Array(wasmBase64);
+  if (!wasmBytes || wasmBytes.length === 0) {
+    throw new Error('WASM bytes are empty! Check your base64 conversion and file generation.');
+  }
 
   const go = new Go();
   const importObject = go.importObject;
-  const { instance } = await WebAssembly.instantiate(wasmBuffer, importObject);
+  const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
 
   try {
     go.run(instance);

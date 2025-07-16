@@ -4,6 +4,7 @@ import type { Provider } from './provider';
 import { serializeForRpc, normalizeResponse } from './utils.js';
 
 export interface TxParams {
+  from: string;
   nonce: any;
   gasPrice: string;
   gasLimit?: string;
