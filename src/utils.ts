@@ -6,11 +6,8 @@ const WEI_FACTOR = BigInt("1000000000000000000");
 const NINE_DECIMAL_FACTOR = BigInt("1000000000");
 
 /**
- * Convert a hex string to its decimal representation.
- *
- * @param hex  A hex string, with or without "0x" prefix (e.g. "0x19c" or "19C")
- * @returns    The decimal value as a string
- * @throws     Error if the input is not a valid hex string
+ * Convert a hex string to a decimal representation (as string or number).
+ * No extra multiplication: assumes input is already in base units (Wei or token base units).
  */
 export function hexToDecimalString(hex: string): string | number {
   if (typeof hex !== 'string') {
@@ -38,22 +35,21 @@ export function hexToDecimalString(hex: string): string | number {
 }
 
 /**
- * Convert a hex string to a decimal-string or Wei-string if key includes "amount".
- * Updated to support both 18 and 9 decimal places based on context.
+ * Convert a hex string to a decimal-string (no extra multiplication).
+ * Use for normalizing RPC response fields that are already in base units.
  */
 export function normalizeHexField(key: string, hex: string): string {
   // Treat '0x' as zero
   if (hex === '0x') return '0';
   const n = BigInt(hex);
-  if (key.toLowerCase().includes("amount") || key.toLowerCase().includes("balance")) {
-    // Use 9 decimals for balance and amount fields (like ethers.utils.formatUnits(balance, 9))
-    return (n * NINE_DECIMAL_FACTOR).toString(10);
-  }
+  // Do NOT multiply by NINE_DECIMAL_FACTOR or WEI_FACTOR here!
+  // RPC responses are already in base units.
   return n.toString(10);
 }
 
 /**
  * Serialize a decimal (number, string of digits, or bigint) to hex-with-0x.
+ * Assumes input is in base units (Wei or token base units).
  */
 export function decimalToHex(value: number | string | bigint): string {
   return "0x" + BigInt(value).toString(16);
@@ -61,6 +57,7 @@ export function decimalToHex(value: number | string | bigint): string {
 
 /**
  * Convert an Ether value (number, string, bigint) → Wei → hex-with-0x.
+ * Use when input is in whole Ether and you need to send as Wei.
  */
 export function etherToWeiHex(value: number | string | bigint): string {
   const wei = BigInt(value) * WEI_FACTOR;
@@ -69,6 +66,7 @@ export function etherToWeiHex(value: number | string | bigint): string {
 
 /**
  * Convert a value to hex with 9 decimal places (like some tokens).
+ * Use when input is in whole tokens and you need to send as base units.
  */
 export function valueToNineDecimalHex(value: number | string | bigint): string {
   const scaled = BigInt(value) * NINE_DECIMAL_FACTOR;
@@ -87,16 +85,25 @@ export function formatUnits(value: string | number | bigint, decimals: number = 
 
 /**
  * Walk and serialize all fields in TxParams for JSON-RPC
- * Updated to use 9 decimals for balance and amount fields.
+ * Only multiply by NINE_DECIMAL_FACTOR or WEI_FACTOR if input is in whole tokens/Ether.
+ * If input is already in base units, just convert to hex.
+ *
+ * For this SDK, assume that for keys like 'value', 'amount', or 'balance',
+ * the input is in whole tokens (for 9-decimal tokens) or Ether (for Ether transfers),
+ * and needs to be converted to base units for the RPC.
  */
 export function serializeForRpc(payload: Record<string, any>): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [key, val] of Object.entries(payload)) {
     if (typeof val === 'number' || (/^[0-9]+$/.test(val as string))) {
-      if (key === 'value' || key.toLowerCase().includes('amount') || key.toLowerCase().includes('balance')) {
-        // Use 9 decimals for balance and amount fields
+      if (key === 'value') {
+        // For Ether, convert to Wei hex
+        out[key] = etherToWeiHex(val);
+      } else if (key.toLowerCase().includes('amount') || key.toLowerCase().includes('balance')) {
+        // For 9-decimal tokens, convert to base units hex
         out[key] = valueToNineDecimalHex(val);
       } else {
+        // For other numbers, just convert to hex
         out[key] = decimalToHex(val);
       }
     } else {
