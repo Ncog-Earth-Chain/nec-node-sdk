@@ -3,6 +3,8 @@ export { Provider } from './provider';
 export { Wallet, Signer } from './wallet.browser';
 export { Contract } from './contract';
 export { InjectedProvider, ExtensionSigner } from './extension';
+export { ContractFactory } from './contract-factory';
+export { Subscription } from './subscription';
 
 // Browser-specific MLKEM exports
 export { loadWasm, loadWasmFromBuffer, type MlKemBrowser } from './webassembly/mlkem-browser';

@@ -7,6 +7,180 @@
 // See package.json "browser" field and mlkem.ts for environment selection logic.
 // Browser-compatible MLKEM WebAssembly loader
 
+function createGoRuntime() {
+
+  "use strict";
+
+  // Check if we're in a browser environment
+  if (typeof window === 'undefined' && typeof self === 'undefined') {
+    throw new Error('This runtime is designed for browser environments');
+  }
+  const _global: any = typeof window !== 'undefined' ? window : self;
+
+  // Go runtime implementation
+  class Go {
+    argv: string[];
+    env: Record<string, string>;
+    exit: (code: number) => void;
+    _callbackTimeouts: Map<number, any>;
+    _nextCallbackTimeoutID: number;
+    _inst: any;
+    _values: Map<any, any>;
+    _goRefCounts: Map<any, any>;
+    _ids: Map<any, any>;
+    _idPool: { get: () => any; put: (id: any) => void };
+    _mem: any;
+    _lastSP: number;
+    importObject: any;
+
+    constructor() {
+      this.argv = [];
+      this.env = {};
+      this.exit = (code: number) => {
+        if (code !== 0) {
+          console.warn('exit code:', code);
+        }
+      };
+      this._callbackTimeouts = new Map();
+      this._nextCallbackTimeoutID = 1;
+
+      const mem = () => {
+        const buffer = new ArrayBuffer(this._inst.exports.mem.buffer.byteLength);
+        const u8 = new Uint8Array(buffer);
+        const u16 = new Uint16Array(buffer);
+        const u32 = new Uint32Array(buffer);
+        const f32 = new Float32Array(buffer);
+        const f64 = new Float64Array(buffer);
+        const setInt64 = (addr: number, v: number) => {
+          u32[addr + 4] = v;
+          u32[addr] = (v / 4294967296) | 0;
+        };
+        const getInt64 = (addr: number) => {
+          const low = u32[addr];
+          const high = u32[addr + 4];
+          return low + high * 4294967296;
+        };
+        const setUint64 = (addr: number, v: number) => {
+          u32[addr + 4] = v;
+          u32[addr] = (v / 4294967296) >>> 0;
+        };
+        const getUint64 = (addr: number) => {
+          const low = u32[addr];
+          const high = u32[addr + 4];
+          return low + high * 4294967296;
+        };
+
+        return {
+          buffer: buffer,
+          u8: u8,
+          u16: u16,
+          u32: u32,
+          u64: new BigUint64Array(buffer),
+          f32: f32,
+          f64: f64,
+          setInt64: setInt64,
+          getInt64: getInt64,
+          setUint64: setUint64,
+          getUint64: getUint64,
+        };
+      };
+
+      this._inst = null;
+      this._values = new Map();
+      this._goRefCounts = new Map();
+      this._ids = new Map();
+      this._idPool = (() => {
+        let ids: any[] = [];
+        return {
+          get: () => {
+            if (ids.length === 0) {
+              ids = new Array(16);
+              for (let i = 0; i < 16; i++) {
+                ids[i] = 1 + i;
+              }
+            }
+            return ids.pop();
+          },
+          put: (id: any) => {
+            ids.push(id);
+          },
+        };
+      })();
+      this._mem = mem();
+      this._lastSP = 0;
+      this.importObject = {
+        go: {
+          js: {
+            mem: this._mem,
+            setInt64: this._mem.setInt64,
+            getInt64: this._mem.getInt64,
+            setUint64: this._mem.setUint64,
+            getUint64: this._mem.getUint64,
+            debug: (value: any) => {
+              console.log(value);
+            },
+          },
+        },
+      };
+    }
+
+    run(instance: WebAssembly.Instance) {
+      this._inst = instance;
+      this._mem = new DataView(this._inst.exports.mem.buffer);
+      this._values = new Map();
+      this._goRefCounts = new Map();
+      this._ids = new Map();
+      this._idPool = (() => {
+        let ids: any[] = [];
+        return {
+          get: () => {
+            if (ids.length === 0) {
+              ids = new Array(16);
+              for (let i = 0; i < 16; i++) {
+                ids[i] = 1 + i;
+              }
+            }
+            return ids.pop();
+          },
+          put: (id: any) => {
+            ids.push(id);
+          },
+        };
+      })();
+
+      const setInt64 = (addr: number, v: number) => {
+        this._mem.setUint32(addr + 4, v, true);
+        this._mem.setUint32(addr, (v / 4294967296) | 0, true);
+      };
+      const getInt64 = (addr: number) => {
+        const low = this._mem.getUint32(addr, true);
+        const high = this._mem.getInt32(addr + 4, true);
+        return low + high * 4294967296;
+      };
+      const setUint64 = (addr: number, v: number) => {
+        this._mem.setUint32(addr + 4, v, true);
+        this._mem.setUint32(addr, (v / 4294967296) >>> 0, true);
+      };
+      const getUint64 = (addr: number) => {
+        const low = this._mem.getUint32(addr, true);
+        const high = this._mem.getUint32(addr + 4, true);
+        return low + high * 4294967296;
+      };
+
+      (this._mem as any).setInt64 = setInt64;
+      (this._mem as any).getInt64 = getInt64;
+      (this._mem as any).setUint64 = setUint64;
+      (this._mem as any).getUint64 = getUint64;
+
+      this._inst.exports.run();
+    }
+  }
+
+  // Make Go available globally
+  _global.Go = Go;
+
+}
+
 // --- Polyfill for Web Crypto API ---
 declare global {
   var Go: any;
@@ -28,15 +202,17 @@ if (typeof globalThis.crypto === 'undefined') {
   throw new Error('Web Crypto API is required but not available in this environment');
 }
 
-// --- End Polyfill ---
+import { wasmBase64 } from '../webassembly/wasm-base64';
 
-function getWasmUrl(filename = 'main.wasm') {
-  // Get the current script/module URL (works for ESM modules)
-  // @ts-ignore
-  const scriptUrl = import.meta.url || (document.currentScript && document.currentScript.src);
-  if (!scriptUrl) throw new Error('Cannot determine script URL for WASM loading');
-  // If your WASM is in a subfolder next to the JS bundle:
-  return new URL(`./webassembly/${filename}`, scriptUrl).toString();
+function base64ToUint8Array(base64: string): Uint8Array {
+  // Browser-only base64 decode
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 /**
@@ -98,40 +274,22 @@ export interface MlKemBrowser {
 
 /**
  * Load and initialize the MLKEM Go WebAssembly module in browser.
- * @param wasmPath Optional override for the WASM file URL.
  */
-export async function loadWasm(wasmPath: string = '/main.wasm'): Promise<MlKemBrowser> {
+export async function loadWasm(): Promise<MlKemBrowser> {
+
   if (typeof globalThis.Go === 'undefined') {
-    throw new Error('Go WebAssembly runtime not loaded. Please include wasm_exec.js before using this module.');
+    createGoRuntime();
   }
 
-  // Try multiple candidate locations for the WASM file
-  const candidates = [
-    wasmPath,
-    '/node_modules/ncog/dist/webassembly/main.wasm', // fallback to package
-    getWasmUrl(), // dynamic relative to bundle
-  ].filter((v): v is string => typeof v === 'string' && !!v);
-
-  let wasmBuffer: ArrayBuffer | undefined;
-  let lastError: any;
-  for (const url of candidates) {
-    try {
-      const resp = await fetch(url);
-      if (resp.ok) {
-        wasmBuffer = await resp.arrayBuffer();
-        break;
-      }
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  if (!wasmBuffer) {
-    throw lastError || new Error('Could not load WASM file from any known location');
+  const wasmBytes = base64ToUint8Array(wasmBase64);
+  console.log("wasmBytes length", wasmBytes.length);
+  if (!wasmBytes || wasmBytes.length === 0) {
+    throw new Error('WASM bytes are empty! Check your base64 conversion and file generation.');
   }
 
   const go = new Go();
   const importObject = go.importObject;
-  const { instance } = await WebAssembly.instantiate(wasmBuffer, importObject);
+  const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
 
   try {
     go.run(instance);
@@ -226,11 +384,11 @@ export async function loadWasm(wasmPath: string = '/main.wasm'): Promise<MlKemBr
       return result.address;
     },
 
-    signTransactionMLDSA87:(TxObject : any, privateKeyHex : string) => {
+    signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => {
       if (typeof globalThis.signTransactionMLDSA87 !== 'function') {
         throw new Error('signTransactionMLDSA87 not found on globalThis');
       }
-      const result = globalThis.signTransactionMLDSA87(TxObject, privateKeyHex );
+      const result = globalThis.signTransactionMLDSA87(TxObject, privateKeyHex);
       if (result?.error) throw new Error(`Go signTransactionMLDSA87 failed: ${result.error}`);
       if (typeof result !== 'object') {
         console.error('Unexpected result:', result);
@@ -238,11 +396,11 @@ export async function loadWasm(wasmPath: string = '/main.wasm'): Promise<MlKemBr
       }
       return result;
     },
-    decodeRLPTransaction: (KeyHex: string) => {
+    decodeRLPTransaction: (txHex: string) => {
       if (typeof globalThis.decodeRLPTransaction !== 'function') {
         throw new Error('decodeRLPTransaction not found on globalThis');
       }
-      const result = globalThis.decodeRLPTransaction(KeyHex);
+      const result = globalThis.decodeRLPTransaction(txHex);
       if (result?.error) throw new Error(`Go decodeRLPTransaction failed: ${result.error}`);
       if (typeof result !== 'object') {
         console.error('Unexpected result:', result);
@@ -259,7 +417,7 @@ export async function loadWasm(wasmPath: string = '/main.wasm'): Promise<MlKemBr
  */
 export async function loadWasmFromBuffer(wasmBuffer: ArrayBuffer): Promise<MlKemBrowser> {
   if (typeof globalThis.Go === 'undefined') {
-    throw new Error('Go WebAssembly runtime not loaded. Please include wasm_exec.js before using this module.');
+    createGoRuntime();
   }
 
   const go = new Go();
@@ -349,7 +507,7 @@ export async function loadWasmFromBuffer(wasmBuffer: ArrayBuffer): Promise<MlKem
       return result.address;
     },
 
-    signTransactionMLDSA87:(TxObject : any, privateKeyHex : string) => {
+    signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => {
       if (typeof globalThis.signTransactionMLDSA87 !== 'function') {
         throw new Error('signTransactionMLDSA87 not found on globalThis');
       }
@@ -361,11 +519,11 @@ export async function loadWasmFromBuffer(wasmBuffer: ArrayBuffer): Promise<MlKem
       return result;
     },
 
-    decodeRLPTransaction: (KeyHex: string) => {
+    decodeRLPTransaction: (txHex: string) => {
       if (typeof globalThis.decodeRLPTransaction !== 'function') {
         throw new Error('decodeRLPTransaction not found on globalThis');
       }
-      const result = globalThis.decodeRLPTransaction(KeyHex);
+      const result = globalThis.decodeRLPTransaction(txHex);
       if (result?.error) throw new Error(`Go decodeRLPTransaction failed: ${result.error}`);
       if (typeof result !== 'object') {
         throw new Error('Invalid result from decodeRLPTransaction');
