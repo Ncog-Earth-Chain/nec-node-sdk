@@ -44,7 +44,7 @@
     "node": ">=16.0.0"
   },
   "scripts": {
-    "script":"npx ts-node scripts/convert-to-wasm.ts src/webassembly/main.wasm src/wasm/wasm-base64.ts",
+    "script": "npx ts-node scripts/convert-to-wasm.ts src/webassembly/main.wasm src/wasm/wasm-base64.ts",
     "build": "rimraf dist && npm run script && rollup -c --bundleConfigAsCjs && cpr src/wasm dist/webassembly -o && cpr src/wasm dist/ -o ",
     "test": "jest --coverage",
     "lint": "eslint src --ext .ts",
