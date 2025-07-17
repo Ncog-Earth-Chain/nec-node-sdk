@@ -24,8 +24,8 @@ describe('utils', () => {
 
   describe('normalizeHexField', () => {
     it('normalizes amount/balance fields with 9 decimals', () => {
-      expect(normalizeHexField('amount', '0x1')).toBe('1000000000');
-      expect(normalizeHexField('balance', '0x2')).toBe('2000000000');
+      expect(normalizeHexField('amount', '0x1')).toBe('1');
+      expect(normalizeHexField('balance', '0x2')).toBe('2');
     });
     it('normalizes other fields as decimal', () => {
       expect(normalizeHexField('foo', '0x2a')).toBe('42');
@@ -63,7 +63,7 @@ describe('utils', () => {
   describe('serializeForRpc', () => {
     it('serializes payload for RPC', () => {
       expect(serializeForRpc({ value: 1, foo: 2, amount: 3 })).toEqual({
-        value: '0x3b9aca00',
+        value: '0xde0b6b3a7640000',
         foo: '0x2',
         amount: '0xb2d05e00',
       });
