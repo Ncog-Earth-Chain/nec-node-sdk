@@ -1,9 +1,9 @@
 # Node.js Integration
 
-You can use the NCOG SDK directly in any Node.js application. Example:
+You can use the NECJS SDK directly in any Node.js application. Example:
 
 ```js
-const { loadWasm, Provider, Wallet } = require('ncog');
+const { loadWasm, Provider, Wallet } = require('necjs');
 
 (async () => {
   await loadWasm(); // Required for cryptography
@@ -19,7 +19,7 @@ const { loadWasm, Provider, Wallet } = require('ncog');
 ## Contract Deployment Example
 
 ```js
-const { Provider, Wallet, ContractFactory, loadWasm } = require('ncog');
+const { Provider, Wallet, ContractFactory, loadWasm } = require('necjs');
 
 (async () => {
   await loadWasm();
@@ -40,7 +40,7 @@ const { Provider, Wallet, ContractFactory, loadWasm } = require('ncog');
 ## Real-Time Event Subscription Example
 
 ```js
-const { Subscription } = require('ncog');
+const { Subscription } = require('necjs');
 
 const wsUrl = 'wss://rpc.ncog.earth';
 const sub = new Subscription(wsUrl);

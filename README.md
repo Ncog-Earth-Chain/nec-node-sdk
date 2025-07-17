@@ -1,4 +1,4 @@
-# NCOG BLOCKCHAIN SDK
+# NEC BLOCKCHAIN SDK
 
 **The all-in-one JavaScript/TypeScript SDK for building apps on the NCOG Earth Chain.**  
 Supports Node.js, browsers, React, Next.js, Vite, and more.  
@@ -11,14 +11,14 @@ Includes post-quantum cryptography, wallet management, contract interaction, ext
 ### 1. Install
 
 ```bash
-npm install ncog
+npm install necjs
 ```
 
 ### 2. Connect in Your App
 
 **With a Private Key:**
 ```js
-import { loadWasm, Provider, Wallet } from 'ncog';
+import { loadWasm, Provider, Wallet } from 'necjs';
 
 (async () => {
   await loadWasm(); // Required for cryptography
@@ -31,7 +31,7 @@ import { loadWasm, Provider, Wallet } from 'ncog';
 
 **With a Browser Extension Wallet:**
 ```js
-import { Provider, ExtensionSigner } from 'ncog';
+import { Provider, ExtensionSigner } from 'necjs';
 
 (async () => {
   if (window.ncogWallet) {
@@ -110,7 +110,7 @@ import { Provider, ExtensionSigner } from 'ncog';
 
 ## 🤝 Community & Support
 
-- [GitHub Issues](https://github.com/Ncog-Earth-Chain/ncog-node-sdk/issues)
+- [GitHub Issues](https://github.com/Ncog-Earth-Chain/nec-node-sdk/issues)
 - [NCOG Earth Chain Website](https://ncog.earth)
 
 ---
@@ -121,4 +121,4 @@ MIT
 
 ---
 
-**Ready to build the future? Start with NCOG SDK today!** 
+**Ready to build the future? Start with NECJS SDK today!** 

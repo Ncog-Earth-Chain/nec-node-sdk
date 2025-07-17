@@ -9,7 +9,7 @@ This guide shows how to integrate the NCOG SDK in popular frontend frameworks, i
 ### Using Wallet
 ```jsx
 import React, { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'ncog';
+import { loadWasm, Provider, Wallet } from 'necjs';
 
 function App() {
   const [balance, setBalance] = useState(null);
@@ -26,7 +26,7 @@ function App() {
 
   return (
     <div>
-      <h1>NCOG React Example (Wallet)</h1>
+      <h1>NECJS React Example (Wallet)</h1>
       <p>Balance: {balance}</p>
     </div>
   );
@@ -38,7 +38,7 @@ export default App;
 ### Using Extension Wallet
 ```jsx
 import React, { useEffect, useState } from 'react';
-import { Provider, ExtensionSigner } from 'ncog';
+import { Provider, ExtensionSigner } from 'necjs';
 
 function App() {
   const [address, setAddress] = useState(null);
@@ -59,7 +59,7 @@ function App() {
 
   return (
     <div>
-      <h1>NCOG React Example (Extension Wallet)</h1>
+      <h1>NECJS React Example (Extension Wallet)</h1>
       <p>Address: {address}</p>
       <p>Balance: {balance}</p>
     </div>
@@ -76,7 +76,7 @@ export default App;
 ### Using Wallet
 ```js
 import { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'ncog';
+import { loadWasm, Provider, Wallet } from 'necjs';
 
 export default function Home() {
   const [balance, setBalance] = useState(null);
@@ -93,7 +93,7 @@ export default function Home() {
 
   return (
     <main>
-      <h1>NCOG Next.js Example (Wallet)</h1>
+      <h1>NECJS Next.js Example (Wallet)</h1>
       <p>Balance: {balance}</p>
     </main>
   );
@@ -103,7 +103,7 @@ export default function Home() {
 ### Using Extension Wallet
 ```js
 import { useEffect, useState } from 'react';
-import { Provider, ExtensionSigner } from 'ncog';
+import { Provider, ExtensionSigner } from 'necjs';
 
 export default function Home() {
   const [address, setAddress] = useState(null);
@@ -124,7 +124,7 @@ export default function Home() {
 
   return (
     <main>
-      <h1>NCOG Next.js Example (Extension Wallet)</h1>
+      <h1>NECJS Next.js Example (Extension Wallet)</h1>
       <p>Address: {address}</p>
       <p>Balance: {balance}</p>
     </main>
@@ -139,7 +139,7 @@ export default function Home() {
 ### Using Wallet
 ```jsx
 import { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'ncog';
+import { loadWasm, Provider, Wallet } from 'necjs';
 
 function App() {
   const [balance, setBalance] = useState(null);
@@ -156,7 +156,7 @@ function App() {
 
   return (
     <div>
-      <h1>NCOG Vite.js Example (Wallet)</h1>
+      <h1>NECJS Vite.js Example (Wallet)</h1>
       <p>Balance: {balance}</p>
     </div>
   );
@@ -168,7 +168,7 @@ export default App;
 ### Using Extension Wallet
 ```jsx
 import { useEffect, useState } from 'react';
-import { Provider, ExtensionSigner } from 'ncog';
+import { Provider, ExtensionSigner } from 'necjs';
 
 function App() {
   const [address, setAddress] = useState(null);
@@ -189,7 +189,7 @@ function App() {
 
   return (
     <div>
-      <h1>NCOG Vite.js Example (Extension Wallet)</h1>
+      <h1>NECJS Vite.js Example (Extension Wallet)</h1>
       <p>Address: {address}</p>
       <p>Balance: {balance}</p>
     </div>
@@ -204,7 +204,7 @@ export default App;
 ## Contract Deployment & Interaction Example
 
 ```js
-import { Provider, Wallet, ContractFactory } from 'ncog';
+import { Provider, Wallet, ContractFactory } from 'necjs';
 
 (async () => {
   await loadWasm();
@@ -233,7 +233,7 @@ import { Provider, Wallet, ContractFactory } from 'ncog';
 ## Real-Time Event Subscription Example
 
 ```js
-import { Subscription } from 'ncog';
+import { Subscription } from 'necjs';
 
 const wsUrl = 'wss://rpc.ncog.earth';
 const sub = new Subscription(wsUrl);
@@ -257,7 +257,7 @@ const subId = await sub.subscribe('newHeads', [], (blockHeader) => {
 ## Utility Function Examples
 
 ```js
-import { isValidAddress, hexToDecimalString, etherToWeiHex } from 'ncog';
+import { isValidAddress, hexToDecimalString, etherToWeiHex } from 'necjs';
 
 console.log(isValidAddress('0x123...')); // true/false
 console.log(hexToDecimalString('0x1a')); // '26'

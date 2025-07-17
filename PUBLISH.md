@@ -1,4 +1,4 @@
-# Publishing the `ncog` npm Package
+# Publishing the `necjs` npm Package
 
 This document provides step-by-step instructions and a checklist to ensure a smooth npm publish process.
 

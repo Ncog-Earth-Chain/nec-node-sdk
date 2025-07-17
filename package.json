@@ -1,7 +1,7 @@
 {
-  "name": "ncog",
+  "name": "necjs",
   "version": "0.1.0",
-  "description": "JavaScript SDK for NCOG Earth Chain RPC",
+  "description": "NECJS SDK for NCOG Earth Chain RPC",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "browser": {
@@ -15,9 +15,11 @@
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ncog-Earth-Chain/ncog-node-sdk.git"
+    "url": "git+https://github.com/Ncog-Earth-Chain/nec-node-sdk.git"
   },
   "keywords": [
+    "necjs",
+    "nec",
     "ncog",
     "blockchain",
     "rpc",

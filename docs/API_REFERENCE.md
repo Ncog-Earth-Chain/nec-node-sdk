@@ -1,8 +1,8 @@
 # API Reference
 
-This document provides an overview of the main modules, classes, and features of the NCOG SDK. For full source code and the latest updates, see:
+This document provides an overview of the main modules, classes, and features of the NECJS SDK. For full source code and the latest updates, see:
 
-[https://github.com/Ncog-Earth-Chain/ncog-node-sdk](https://github.com/Ncog-Earth-Chain/ncog-node-sdk)
+[https://github.com/Ncog-Earth-Chain/nec-node-sdk](https://github.com/Ncog-Earth-Chain/nec-node-sdk)
 
 ---
 
