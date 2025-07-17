@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Ncog-Earth-Chain/nec-node-sdk/main/assets/companyLogo.png" alt="Company Logo" width="400" />
+</div>
+
 # NEC BLOCKCHAIN SDK
 
 **The all-in-one JavaScript/TypeScript SDK for building apps on the NCOG Earth Chain.**  
