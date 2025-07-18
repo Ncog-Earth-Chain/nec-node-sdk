@@ -1,7 +1,7 @@
 // src/wallet.ts
 import { loadWasm } from './webassembly/mlkem';
 import type { Provider } from './provider';
-import { normalizeResponse } from './utils';
+import { etherToWeiHex, normalizeResponse } from './utils';
 
 export interface TxParams {
   from: string;
@@ -87,7 +87,10 @@ export class Signer {
     ) {
       throw new Error('Missing required transaction parameters: gasLimit, gasPrice, nonce');
     }
-    
+    if (txParams.value && txParams.value != '0x') {
+      txParams.value = etherToWeiHex(txParams.value)
+    }
+
     const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(txParams, this.wallet.privateKey);
     if (!rawSignedObj || (!rawSignedObj.raw && !rawSignedObj.rawTransaction)) {
       throw new Error('signTransactionMLDSA87 failed: ' + JSON.stringify(rawSignedObj));

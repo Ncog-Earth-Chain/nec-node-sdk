@@ -69,7 +69,7 @@ describe('Signer', () => {
       gasPrice: '0x1',
       gasLimit: '0x5208',
       to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
-      value: '0x0',
+      value: '0',
       data: '0x',
       chainId: 1,
     };

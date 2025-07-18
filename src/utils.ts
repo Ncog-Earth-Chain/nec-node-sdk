@@ -1,109 +1,168 @@
 // src/utils.ts
 
-// BigInt factor for converting Ether ↔ Wei (18 decimals)
-const WEI_FACTOR = BigInt("1000000000000000000");
-// BigInt factor for 9 decimal places (like some tokens)
-const NINE_DECIMAL_FACTOR = BigInt("1000000000");
+// Generic base for decimal handling
+const TEN = BigInt(10);
+// Default number of decimals (e.g., for Ether or NEC token)
+export const DEFAULT_DECIMALS = 18;
+// NEC token decimals (replace if different)
+export const NEC_DECIMALS = 18;
+// BigInt factor for converting whole units ↔ base units
+export const WEI_FACTOR = TEN ** BigInt(DEFAULT_DECIMALS);
 
 /**
- * Convert a hex string to a decimal representation (as string or number).
- * No extra multiplication: assumes input is already in base units (Wei or token base units).
+ * Convert a hex string to a decimal (string or number).
+ * Assumes input is already in base units.
  */
 export function hexToDecimalString(hex: string): string | number {
   if (typeof hex !== 'string') {
     throw new TypeError(`hexToDecimalString: expected a string, got ${typeof hex}`);
   }
-
-  // Trim whitespace and normalize case
   const raw = hex.trim().toLowerCase();
-
-  // Special case: treat '0x' as zero
   if (raw === '0x') return 0;
-
-  // Ensure 0x prefix
   const normalized = raw.startsWith('0x') ? raw : `0x${raw}`;
-
-  // Validate that what's left is 0x followed by 1+ hex digits
   if (!/^0x[0-9a-f]+$/.test(normalized)) {
     throw new Error(`hexToDecimalString: invalid hex string "${hex}"`);
   }
-
-  const finalValue = BigInt(normalized).toString(10)
-
-  // BigInt will correctly parse the 0x-prefixed hex
-  return isNaN(Number(finalValue)) ? finalValue : Number(finalValue);
+  const asDec = BigInt(normalized).toString(10);
+  return isNaN(Number(asDec)) ? asDec : Number(asDec);
 }
 
 /**
  * Convert a hex string to a decimal-string (no extra multiplication).
- * Use for normalizing RPC response fields that are already in base units.
+ * Use for normalizing RPC response fields already in base units.
  */
 export function normalizeHexField(key: string, hex: string): string {
-  // Treat '0x' as zero
   if (hex === '0x') return '0';
-  const n = BigInt(hex);
-  // Do NOT multiply by NINE_DECIMAL_FACTOR or WEI_FACTOR here!
-  // RPC responses are already in base units.
-  return n.toString(10);
+  return BigInt(hex).toString(10);
 }
 
 /**
- * Serialize a decimal (number, string of digits, or bigint) to hex-with-0x.
- * Assumes input is in base units (Wei or token base units).
+ * Serialize a decimal (number, numeric-string, or bigint) to hex-with-0x.
+ * Assumes input is already in base units.
  */
 export function decimalToHex(value: number | string | bigint): string {
-  return "0x" + BigInt(value).toString(16);
+  return '0x' + BigInt(value).toString(16);
 }
 
 /**
- * Convert an Ether value (number, string, bigint) → Wei → hex-with-0x.
- * Use when input is in whole Ether and you need to send as Wei.
+ * Generic: parse whole- or fractional-unit amount into base-unit hex.
+ * Accepts number|string|bigint, handles fractional up to `decimals`.
+ */
+export function parseUnits(
+  value: number | string | bigint,
+  decimals: number = DEFAULT_DECIMALS
+): string {
+  let str: string;
+  if (typeof value === 'number') {
+    str = value.toFixed(decimals);
+  } else {
+    str = value.toString();
+  }
+
+  const [wholePart, fracPart = ''] = str.split('.');
+  if (!/^\d+$/.test(wholePart) || !/^\d*$/.test(fracPart)) {
+    throw new Error(`parseUnits: invalid numeric value "${value}"`);
+  }
+  if (fracPart.length > decimals) {
+    throw new Error(
+      `parseUnits: too many decimal places (max ${decimals}) in "${value}"`
+    );
+  }
+
+  const factor = decimals === DEFAULT_DECIMALS ? WEI_FACTOR : TEN ** BigInt(decimals);
+  const whole = BigInt(wholePart) * factor;
+  const frac = BigInt(fracPart.padEnd(decimals, '0'));
+  const combined = whole + frac;
+
+  return '0x' + combined.toString(16);
+}
+
+/**
+ * Convert an Ether value (number|string|bigint), including fractional,
+ * → Wei → hex-with-0x.
  */
 export function etherToWeiHex(value: number | string | bigint): string {
-  const wei = BigInt(value) * WEI_FACTOR;
-  return "0x" + wei.toString(16);
+  return parseUnits(value, DEFAULT_DECIMALS);
 }
 
 /**
- * Convert a value to hex with 9 decimal places (like some tokens).
- * Use when input is in whole tokens and you need to send as base units.
+ * Convert a Wei-hex (or bigint or numeric string) into an Ether decimal string.
  */
-export function valueToNineDecimalHex(value: number | string | bigint): string {
-  const scaled = BigInt(value) * NINE_DECIMAL_FACTOR;
-  return "0x" + scaled.toString(16);
+export function hexToEther(
+  value: string | number | bigint
+): string {
+  return formatUnits(value, DEFAULT_DECIMALS);
 }
 
 /**
- * Format a value with 9 decimal places (similar to ethers.utils.formatUnits).
+ * Generic: format a base-unit amount (hex, number, or bigint)
+ * into a human-readable decimal string.
  */
-export function formatUnits(value: string | number | bigint, decimals: number = 9): string {
-  const bigValue = BigInt(value);
-  const factor = decimals === 9 ? NINE_DECIMAL_FACTOR : WEI_FACTOR;
-  const result = Number(bigValue) / Number(factor);
-  return result.toString();
+export function formatUnits(
+  value: string | number | bigint,
+  decimals: number = DEFAULT_DECIMALS
+): string {
+  const big =
+    typeof value === 'string' && value.startsWith('0x')
+      ? BigInt(value)
+      : BigInt(value);
+  const factor = decimals === DEFAULT_DECIMALS ? WEI_FACTOR : TEN ** BigInt(decimals);
+  const integer = big / factor;
+  const fraction = big % factor;
+
+  let fracStr = fraction
+    .toString()
+    .padStart(decimals, '0')
+    .replace(/0+$/, '');
+
+  return fracStr ? `${integer.toString()}.${fracStr}` : integer.toString();
 }
 
 /**
- * Walk and serialize all fields in TxParams for JSON-RPC
- * Only multiply by NINE_DECIMAL_FACTOR or WEI_FACTOR if input is in whole tokens/Ether.
- * If input is already in base units, just convert to hex.
- *
- * For this SDK, assume that for keys like 'value', 'amount', or 'balance',
- * the input is in whole tokens (for 9-decimal tokens) or Ether (for Ether transfers),
- * and needs to be converted to base units for the RPC.
+ * Convert a NEC base-unit amount (hex, number, or bigint) into a NEC decimal string.
  */
-export function serializeForRpc(payload: Record<string, any>): Record<string, any> {
+export function hexToNec(
+  value: string | number | bigint
+): string {
+  return formatUnits(value, NEC_DECIMALS);
+}
+
+/**
+ * Convert a whole-NEC amount (number|string|bigint) into base-unit hex.
+ */
+export function necToHex(
+  value: number | string | bigint
+): string {
+  return parseUnits(value, NEC_DECIMALS);
+}
+
+/**
+ * Convert a Wei (number, bigint, or hex string) directly into a NEC decimal string.
+ * Useful when NEC is pegged 1:1 with Ether base units.
+ */
+export function weiToNec(
+  value: string | number | bigint
+): string {
+  return formatUnits(value, NEC_DECIMALS);
+}
+
+/**
+ * Walk and serialize all fields in TxParams for JSON-RPC.
+ */
+export function serializeForRpc(
+  payload: Record<string, any>
+): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [key, val] of Object.entries(payload)) {
     if (typeof val === 'number' || (/^[0-9]+$/.test(val as string))) {
       if (key === 'value') {
-        // For Ether, convert to Wei hex
         out[key] = etherToWeiHex(val);
-      } else if (key.toLowerCase().includes('amount') || key.toLowerCase().includes('balance')) {
-        // For 9-decimal tokens, convert to base units hex
-        out[key] = valueToNineDecimalHex(val);
+      } else if (
+        key.toLowerCase().includes('amount') ||
+        key.toLowerCase().includes('balance')
+      ) {
+        out[key] = parseUnits(val);
       } else {
-        // For other numbers, just convert to hex
         out[key] = decimalToHex(val);
       }
     } else {
@@ -114,35 +173,38 @@ export function serializeForRpc(payload: Record<string, any>): Record<string, an
 }
 
 /**
- * Walk and normalize JSON-RPC response (hex → decimal or Wei)
+ * Walk and normalize JSON-RPC response (hex → decimal string or number).
  */
-export function normalizeResponse(resp: Record<string, any> | any ): Record<string, any> | any {
-  const out: Record<string, any> = {};
-
-  if (resp === null) return out;
-
-  if (typeof resp == 'boolean') return resp;
-
+export function normalizeResponse(
+  resp: Record<string, any> | any
+): Record<string, any> | any {
+  if (resp === null) return {};
+  if (typeof resp === 'boolean') return resp;
   if (typeof resp === 'string') {
-    // If it's a likely hash/address, return as is
     if (/^0x[a-fA-F0-9]{40,}$/.test(resp)) return resp;
     return hexToDecimalString(resp);
   }
-
   if (Array.isArray(resp)) {
-    return resp.map(v => (typeof v === 'object' ? normalizeResponse(v) : v));
+    return resp.map((v) =>
+      typeof v === 'object' ? normalizeResponse(v) : v
+    );
   }
 
+  const out: Record<string, any> = {};
   for (const [key, val] of Object.entries(resp)) {
     if (typeof val === 'string' && val.startsWith('0x')) {
-      // Leave address-like and hash-like fields untouched
-      if ([ 'address', 'hash', 'from', 'to', 'transactionHash', 'blockHash', 'contractAddress' ].includes(key)) {
+      if (
+        ['address','hash','from','to','transactionHash','blockHash','contractAddress']
+        .includes(key)
+      ) {
         out[key] = val;
       } else {
         out[key] = normalizeHexField(key, val);
       }
     } else if (Array.isArray(val)) {
-      out[key] = val.map(v => (typeof v === 'object' ? normalizeResponse(v) : v));
+      out[key] = val.map((v) =>
+        typeof v === 'object' ? normalizeResponse(v) : v
+      );
     } else if (val && typeof val === 'object') {
       out[key] = normalizeResponse(val);
     } else {
@@ -153,14 +215,13 @@ export function normalizeResponse(resp: Record<string, any> | any ): Record<stri
 }
 
 /**
- * Checks if a string is a valid Ethereum/EVM address (basic format: 0x + 40 hex chars).
- * @param address The address string to validate.
- * @returns true if valid, false otherwise.
+ * Checks if a string is a valid Ethereum/EVM address.
  */
 export function isValidAddress(address: string): boolean {
-  if (typeof address !== 'string') return false;
-  // Must start with 0x and be exactly 42 chars
-  if (!address.startsWith('0x') || address.length !== 42) return false;
-  // Must be all hex digits after 0x
-  return /^[0-9a-fA-F]{40}$/.test(address.slice(2));
+  return (
+    typeof address === 'string' &&
+    address.startsWith('0x') &&
+    address.length === 42 &&
+    /^[0-9a-fA-F]{40}$/.test(address.slice(2))
+  );
 }

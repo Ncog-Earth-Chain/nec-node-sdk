@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { normalizeResponse, serializeForRpc } from './utils';
+import { normalizeResponse, serializeForRpc, weiToNec } from './utils';
 
 /**
  * Represents a structured error returned from a JSON-RPC call.
@@ -207,8 +207,10 @@ export class Provider {
    * @param address The address to get the balance of.
    * @param tag The block tag (e.g., "latest", "earliest", "pending", or a block number). Defaults to "latest".
    */
-  async getBalance(address: string, tag = 'latest'): Promise<string> {
-    return this.rpc('eth_getBalance', [address, tag]);
+  async getBalance(address: string, tag = 'latest'): Promise<number> {
+    const balance = await this.rpc('eth_getBalance', [address, tag]);
+    const convertedBalance = weiToNec(balance);
+    return isNaN(Number(convertedBalance)) ?  0 : Number(convertedBalance);
   }
 
   /**

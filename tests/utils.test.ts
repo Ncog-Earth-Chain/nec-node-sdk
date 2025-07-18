@@ -3,11 +3,13 @@ import {
   normalizeHexField,
   decimalToHex,
   etherToWeiHex,
-  valueToNineDecimalHex,
   formatUnits,
   serializeForRpc,
   normalizeResponse,
   isValidAddress,
+  DEFAULT_DECIMALS,
+  NEC_DECIMALS,
+  WEI_FACTOR,
 } from '../src/utils';
 
 describe('utils', () => {
@@ -41,31 +43,28 @@ describe('utils', () => {
 
   describe('etherToWeiHex', () => {
     it('converts ether to wei hex', () => {
-      expect(etherToWeiHex(1)).toBe('0xde0b6b3a7640000');
-    });
-  });
-
-  describe('valueToNineDecimalHex', () => {
-    it('converts value to 9-decimal hex', () => {
-      expect(valueToNineDecimalHex(2)).toBe('0x77359400');
+      expect(etherToWeiHex(1)).toBe('0x' + WEI_FACTOR.toString(16));
     });
   });
 
   describe('formatUnits', () => {
-    it('formats value with 9 decimals', () => {
-      expect(formatUnits('1000000000')).toBe('1');
-    });
     it('formats value with 18 decimals', () => {
-      expect(formatUnits('1000000000000000000', 18)).toBe('1');
+      const value = (BigInt(1) * (BigInt(10) ** BigInt(DEFAULT_DECIMALS))).toString();
+      expect(formatUnits(value, DEFAULT_DECIMALS)).toBe('1');
+    });
+    it('formats value with NEC decimals', () => {
+      const value = (BigInt(1) * (BigInt(10) ** BigInt(NEC_DECIMALS))).toString();
+      expect(formatUnits(value, NEC_DECIMALS)).toBe('1');
     });
   });
 
   describe('serializeForRpc', () => {
     it('serializes payload for RPC', () => {
+      const expectedAmount = '0x' + (BigInt(3) * (BigInt(10) ** BigInt(DEFAULT_DECIMALS))).toString(16);
       expect(serializeForRpc({ value: 1, foo: 2, amount: 3 })).toEqual({
         value: '0xde0b6b3a7640000',
         foo: '0x2',
-        amount: '0xb2d05e00',
+        amount: expectedAmount,
       });
     });
   });

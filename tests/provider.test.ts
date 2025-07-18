@@ -102,7 +102,7 @@ describe('Provider', () => {
     await expect(provider.getGasPrice()).resolves.toBe(1);
     await expect(provider.accounts()).resolves.toBe(1);
     await expect(provider.getBlockNumber()).resolves.toBe(1);
-    await expect(provider.getBalance('0xabc')).resolves.toBe(1);
+    await expect(provider.getBalance('0xabc')).resolves.toBe(1e-18);
     await expect(provider.getStorageAt('0xabc', '0x0')).resolves.toBe(1);
     await expect(provider.getTransactionCount('0xabc')).resolves.toBe(1);
     await expect(provider.getBlockTransactionCountByNumber('latest')).resolves.toBe(1);
