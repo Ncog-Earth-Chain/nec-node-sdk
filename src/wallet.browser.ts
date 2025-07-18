@@ -1,7 +1,7 @@
 // src/wallet.browser.ts
 import { loadWasm, type MlKemBrowser } from './webassembly/mlkem-browser';
 import type { Provider } from './provider';
-import { serializeForRpc, normalizeResponse } from './utils.js';
+import { normalizeResponse, etherToWeiHex } from './utils.js';
 
 export interface TxParams {
   from: string;
@@ -61,8 +61,24 @@ export class Signer {
   }
 
   async sendTransaction(txParams: TxParams): Promise<string> {
-    const rpcParams = serializeForRpc(txParams);
-    const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(rpcParams, this.wallet.privateKey);
+
+    if (!txParams?.chainId) {
+      txParams.chainId = await this.provider.getChainId();
+    }
+
+    if (
+      (!txParams.gas && !txParams.gasLimit) ||
+      !txParams.gasPrice ||
+      (txParams.nonce !== undefined && txParams.nonce < 0)
+    ) {
+      throw new Error('Missing required transaction parameters: gasLimit, gasPrice, nonce');
+    }
+
+    if (txParams.value && txParams.value != '0x') {
+      txParams.value = etherToWeiHex(txParams.value)
+    }
+
+    const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(txParams, this.wallet.privateKey);
     if (!rawSignedObj || (!rawSignedObj.raw && !rawSignedObj.rawTransaction)) {
       throw new Error('signTransactionMLDSA87 failed: ' + JSON.stringify(rawSignedObj));
     }
