@@ -1,11 +1,10 @@
 import axios from 'axios';
-import { getAllTransactions, getAllTokens, GraphqlParams, TokenParams } from './graphql';
-import * as utils from './utils';
+import { getAllTransactions, getAllTokens, GraphqlParams, TokenParams } from '../src/graphql';
 
 jest.mock('axios');
 
 // Mock utils
-jest.mock('./utils', () => ({
+jest.mock('../src/utils', () => ({
   hexToEther: jest.fn((x) => `ether(${x})`),
   hexToDecimalString: jest.fn((x) => `dec(${x})`),
 }));
