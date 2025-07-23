@@ -146,7 +146,7 @@ export class Contract {
 
   async send(method: string, params: any[], options: Record<string, any>): Promise<string> {
     const data = this.abiInterface.encodeFunctionData(method, params);
-    const tx = { to: this.address, data, value: '0x0', ...options };
+    const tx = { to: this.address, data, value: '', ...options };
     // If signer is present, use it for MLDSA87 signing (wallet or extension)
     if (this.signer) {
       // The signer expects a TxParams object; ensure required fields are present

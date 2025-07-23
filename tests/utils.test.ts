@@ -10,6 +10,7 @@ import {
   DEFAULT_DECIMALS,
   NEC_DECIMALS,
   WEI_FACTOR,
+  decimalToWei,
 } from '../src/utils';
 
 describe('utils', () => {
@@ -88,6 +89,28 @@ describe('utils', () => {
     it('invalidates incorrect address', () => {
       expect(isValidAddress('0x123')).toBe(false);
       expect(isValidAddress('notanaddress')).toBe(false);
+    });
+  });
+
+  describe('decimalToWei', () => {
+    it('converts integer ether to wei string', () => {
+      expect(decimalToWei(1)).toBe('1000000000000000000');
+      expect(decimalToWei('2')).toBe('2000000000000000000');
+      expect(decimalToWei(BigInt(3))).toBe('3000000000000000000');
+    });
+    it('converts fractional ether to wei string', () => {
+      expect(decimalToWei(1.23)).toBe('1230000000000000000');
+      expect(decimalToWei('0.5')).toBe('500000000000000000');
+      expect(decimalToWei('0.000000000000000001')).toBe('1');
+    });
+    it('supports custom decimals', () => {
+      expect(decimalToWei('1', 6)).toBe('1000000');
+      expect(decimalToWei('0.123456', 6)).toBe('123456');
+    });
+    it('throws on invalid input', () => {
+      expect(() => decimalToWei({} as any)).toThrow();
+      expect(() => decimalToWei([] as any)).toThrow();
+      expect(() => decimalToWei('abc')).toThrow();
     });
   });
 }); 

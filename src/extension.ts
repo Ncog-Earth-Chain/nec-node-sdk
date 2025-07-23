@@ -84,23 +84,36 @@ export class ExtensionSigner {
     if (!from) {
       throw new Error("Cannot send transaction: no address is selected in the wallet.");
     }
+
+    // Required fields validation
+    const requiredFields = ['to', 'value', 'gasPrice'];
+    for (const field of requiredFields) {
+      if (!tx[field as keyof TxParams] || (typeof tx[field as keyof TxParams] === 'string' && tx[field as keyof TxParams] === '')) {
+        throw new Error(`Missing required transaction field: ${field}`);
+      }
+    }
+
     if (!tx.chainId) {
       tx.chainId = await this.provider.getChainId();
     }
-    const txParams = {
+
+    // Only include acceptable fields
+    const txParams: Record<string, any> = {
       from,
       to: tx.to,
       value: tx.value,
-      data: tx.data,
-      gas: tx.gasLimit,
-      gasPrice: tx.gasPrice,
-      chainId: tx.chainId
     };
+    if (tx.data !== undefined) txParams.data = tx.data;
+    if (tx.gasLimit !== undefined) txParams.gas = tx.gasLimit;
+    if (tx.gasPrice !== undefined) txParams.gasPrice = tx.gasPrice;
+    if (tx.chainId !== undefined) txParams.chainId = tx.chainId;
+    if (tx.nonce !== undefined) txParams.nonce = tx.nonce;
+    if (tx.gas !== undefined) txParams.gas = tx.gas;
 
     // Try MLDSA87 signing if supported
     if (typeof this.injected.request === 'function') {
       try {
-        const sendResponse = await this.injected.request({ method: 'nec_sendTransaction', params: [txParams] });
+        const sendResponse = await this.injected.request({ method: 'ncog_sendTransaction', params: [txParams] });
         return normalizeResponse(sendResponse.result || sendResponse) as string;
 
       } catch (err) {

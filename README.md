@@ -97,6 +97,16 @@ import { Provider, ExtensionSigner } from 'necjs';
 
 ---
 
+## 📱 React Native Support
+
+NECJS can be used in React Native projects with additional configuration and polyfills. While React Native is not natively supported by Node.js or browser-only JavaScript packages, you can follow our step-by-step guide to enable NECJS in your React Native app.
+
+- **Guide:** [React Native Integration Guide](docs/REACT_NATIVE.md)
+- **Requirements:** Polyfills for Node.js core modules, Metro bundler configuration, and (optionally) WASM loader adjustments.
+- **Limitations:** Some advanced features may require extra patching. See the guide for troubleshooting and caveats.
+
+---
+
 ## 📚 Documentation
 
 - [API Reference](docs/API_REFERENCE.md)

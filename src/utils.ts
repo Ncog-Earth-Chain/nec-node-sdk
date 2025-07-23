@@ -225,3 +225,20 @@ export function isValidAddress(address: string): boolean {
     /^[0-9a-fA-F]{40}$/.test(address.slice(2))
   );
 }
+
+/**
+ * Convert a decimal Ether value (number|string|bigint) to a Wei value as a string (base 10, not hex).
+ * E.g., 1.23 -> '1230000000000000000'
+ */
+export function decimalToWei(
+  value: number | string | bigint,
+  decimals: number = DEFAULT_DECIMALS
+): string {
+  // Use parseUnits to get the hex, then convert to BigInt and return as string
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'bigint') {
+    const str = value.toString();
+    const hex = parseUnits(str, decimals); // returns hex string
+    return BigInt(hex).toString(10);
+  }
+  throw new Error('decimalToWei: invalid value');
+}
