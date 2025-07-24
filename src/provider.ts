@@ -435,7 +435,7 @@ export class Provider {
    */
   async resolveEnsName(ensName: string, registryAddress = '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e'): Promise<string | null> {
     try {
-      const { namehash } = require('ethers').utils;
+      const { namehash } = require('ethers');
       const node = namehash(ensName);
       // ENS registry ABI: function resolver(bytes32 node) external view returns (address)
       const data = '0x0178b8bf' + node.replace(/^0x/, ''); // resolver(bytes32) selector + node

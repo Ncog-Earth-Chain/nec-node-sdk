@@ -10,7 +10,7 @@ Install the SDK and required polyfills:
 
 ```sh
 npm install necjs
-npm install node-libs-react-native react-native-crypto react-native-randombytes stream-browserify
+npm install node-libs-react-native react-native-crypto react-native-randombytes path-browserify react-native-level-fs react-native-quick-crypto react-native-webcrypto buffer
 ```
 
 If you are using React Native < 0.60, link native modules:
@@ -36,17 +36,30 @@ import 'node-libs-react-native/globals';
 Create or update `metro.config.js` in your project root:
 
 ```js
+const path = require('path');
 const { getDefaultConfig } = require('metro-config');
+const nodeLibs = require('node-libs-react-native');
 
 module.exports = (async () => {
-  const {
-    resolver: { sourceExts, assetExts }
-  } = await getDefaultConfig();
+  const config = await getDefaultConfig(__dirname);
+
+  const { assetExts, sourceExts } = config.resolver;
+
   return {
+    ...config,
     resolver: {
-      assetExts: assetExts.filter(ext => ext !== 'wasm'),
-      sourceExts: [...sourceExts, 'wasm'],
-      extraNodeModules: require('node-libs-react-native'),
+      ...config.resolver,
+      assetExts: assetExts.filter(ext => ext !== 'wasm' && ext !== 'svg'),
+      sourceExts: [...sourceExts, 'wasm', 'svg', 'ts', 'tsx', 'jsx'],
+      extraNodeModules: {
+        ...nodeLibs,
+        buffer: require.resolve('buffer/'),
+        process: require.resolve('process/browser'),
+        crypto: require.resolve('react-native-crypto'),
+        path: require.resolve('path-browserify'),
+        fs: require.resolve('react-native-level-fs'),
+        stream: require.resolve('readable-stream'),
+      },
     }
   };
 })();

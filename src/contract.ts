@@ -1,6 +1,6 @@
 import { Provider } from './provider';
 import { TxParams } from './extension';
-import { Interface, Fragment, FunctionFragment } from 'ethers';
+import { Interface, Fragment, FunctionFragment, keccak256 } from 'ethers';
 import { serializeForRpc } from './utils';
 import axios from 'axios';
 import { Subscription } from './subscription';
@@ -319,7 +319,6 @@ export class EventStream {
       this.emit('error', new Error('Event fragment not found for ' + this.eventName));
       return;
     }
-    const { id: keccak256 } = require('ethers').utils;
     const topic = keccak256(`event ${eventFragment.format()}`);
     const filter = {
       address: this.contract.address,

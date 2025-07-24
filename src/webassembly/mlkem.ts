@@ -61,6 +61,7 @@ export interface MlKem {
 // Environment detection
 const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
 const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
+const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
 
 /**
  * Load and initialize the MLKEM Go WebAssembly module.
@@ -71,12 +72,12 @@ export async function loadWasm(): Promise<MlKem> {
     // Use Node.js loader
     const { loadWasm: loadNodeWasm } = await import('./mlkem-node');
     return await loadNodeWasm();
-  } else if (isBrowser) {
-    // Use browser loader
+  } else if (isBrowser || isReactNative) {
+    // Use browser loader for browser and React Native
     const { loadWasm: loadBrowserWasm } = await import('./mlkem-browser');
     return await loadBrowserWasm();
   } else {
-    throw new WasmError('Unsupported environment. This package requires Node.js or a browser environment.', { env: { isNode, isBrowser } });
+    throw new WasmError('Unsupported environment. This package requires Node.js, browser, or React Native.', { env: { isNode, isBrowser, isReactNative } });
   }
 }
 
@@ -86,11 +87,11 @@ export async function loadWasm(): Promise<MlKem> {
 export async function loadWasmFromBuffer(wasmBuffer: ArrayBuffer): Promise<MlKem> {
   if (isNode) {
     throw new WasmError('loadWasmFromBuffer is not supported in Node.js environment. Use loadWasm() instead.', { env: 'node' });
-  } else if (isBrowser) {
+  } else if (isBrowser || isReactNative) {
     const { loadWasmFromBuffer: loadBrowserWasmFromBuffer } = await import('./mlkem-browser');
     return await loadBrowserWasmFromBuffer(wasmBuffer);
   } else {
-    throw new WasmError('Unsupported environment. This package requires Node.js or a browser environment.', { env: { isNode, isBrowser } });
+    throw new WasmError('Unsupported environment. This package requires Node.js, browser, or React Native.', { env: { isNode, isBrowser, isReactNative } });
   }
 }
 

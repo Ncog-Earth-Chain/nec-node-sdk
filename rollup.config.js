@@ -77,7 +77,7 @@ export default [
       name: 'Ncog',
       globals: {
         axios: 'axios',
-        'ethereumjs-util': 'ethereumjsUtil',
+        ethers: 'ethers'     
       },
       inlineDynamicImports: true,
     },
@@ -100,5 +100,6 @@ export default [
       format: 'esm',
       inlineDynamicImports: true,
     },
+    external: ['ws']
   }
 ];
