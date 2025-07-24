@@ -1,8 +1,18 @@
 import { Subscription } from '../src/subscription';
 
 let mockWs: any;
+const wsMock = jest.fn().mockImplementation(() => mockWs);
+
+beforeAll(() => {
+  // Polyfill WebSocket for Node.js
+  (global as any).WebSocket = wsMock;
+});
+afterAll(() => {
+  delete (global as any).WebSocket;
+});
+
 jest.mock('ws', () => {
-  return jest.fn().mockImplementation(() => mockWs);
+  return { WebSocket: wsMock };
 });
 
 describe('Subscription', () => {
@@ -18,7 +28,6 @@ describe('Subscription', () => {
       onerror: undefined,
       onmessage: undefined,
     };
-    (global as any).window = { WebSocket: jest.fn(() => mockWs) };
     sub = new Subscription(url);
   });
 
