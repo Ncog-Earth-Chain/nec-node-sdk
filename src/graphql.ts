@@ -74,15 +74,25 @@ export async function getAllTransactions(params: GraphqlParams): Promise<any> {
             cursor
             transaction {
               hash
+              nonce
+              index
               from
               to
+              contractAddress
               value
               gasUsed
+              gas
+              gasPrice
+              blockHash
+              blockNumber
+              status
               block {
                 number
                 timestamp
               }
               tokenTransactions {
+                hash
+                blockNumber
                 trxIndex
                 tokenAddress
                 tokenName
@@ -143,6 +153,12 @@ export async function getAllTransactions(params: GraphqlParams): Promise<any> {
           if (!edge?.transaction) return;
           if (edge.transaction.value) edge.transaction.value = hexToEther(edge.transaction.value);
           if (edge.transaction.gasUsed) edge.transaction.gasUsed = hexToDecimalString(edge.transaction.gasUsed);
+          if (edge.transaction.gasPrice) edge.transaction.gasPrice = hexToEther(edge.transaction.gasPrice);
+          if (edge.transaction.gas) edge.transaction.gas = hexToDecimalString(edge.transaction.gas);
+          if (edge.transaction.nonce) edge.transaction.nonce = hexToDecimalString(edge.transaction.nonce);
+          if (edge.transaction.index) edge.transaction.index = hexToDecimalString(edge.transaction.index);
+          if (edge.transaction.blockNumber) edge.transaction.blockNumber = hexToDecimalString(edge.transaction.blockNumber);
+          if (edge.transaction.status) edge.transaction.status = hexToDecimalString(edge.transaction.status);
           if (edge.transaction.block) {
             if (edge.transaction.block.number) edge.transaction.block.number = hexToDecimalString(edge.transaction.block.number);
             if (edge.transaction.block.timestamp) edge.transaction.block.timestamp = hexToDecimalString(edge.transaction.block.timestamp);

@@ -154,7 +154,7 @@ export function serializeForRpc(
 ): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [key, val] of Object.entries(payload)) {
-    if (typeof val === 'number' || (/^[0-9]+$/.test(val as string))) {
+    if (typeof val === 'number' || (/^([0-9]*\.?[0-9]+)$/.test(val as string))) {
       if (key === 'value') {
         out[key] = etherToWeiHex(val);
       } else if (
