@@ -53,11 +53,11 @@ export class ExtensionSigner {
 
     const accounts = await this.injected.request({ method: 'ncog_accounts' });
     // The result of eth_requestAccounts is typically an array of addresses.
-    if (!accounts || !accounts?.selectedAccount || !accounts?.selectedAccount?.accountAddress ) {
+    if (!accounts || !accounts?.selectedAccount || !accounts?.selectedAccount?.walletAddress ) {
       throw new Error('No account found. Please connect your wallet.');
     }
 
-    return accounts?.selectedAccount?.accountAddress;
+    return accounts?.selectedAccount?.walletAddress;
   }
 
   /**

@@ -80,6 +80,7 @@ export async function getAllTransactions(params: GraphqlParams): Promise<any> {
               to
               contractAddress
               value
+              inputData
               gasUsed
               gas
               gasPrice
