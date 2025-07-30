@@ -658,6 +658,7 @@ function resolveWasmFile(filename: string) {
   throw new Error(`Cannot resolve wasm file: ${filename}`);
 }
 
+import pako from 'pako';
 import { wasmBase64 } from '../webassembly/wasm-base64';
 
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -765,7 +766,8 @@ export interface MlKemNode {
  * Load and initialize the MLKEM Go WebAssembly module.
  */
 export async function loadWasm(): Promise<MlKemNode> {
-  const wasmBytes = base64ToUint8Array(wasmBase64);
+  const compressedBytes = base64ToUint8Array(wasmBase64);
+  const wasmBytes = pako.ungzip(compressedBytes);
   if (!wasmBytes || wasmBytes.length === 0) {
     throw new Error('WASM bytes are empty! Check your base64 conversion and file generation.');
   }

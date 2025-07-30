@@ -697,6 +697,7 @@ if (typeof globalThis.crypto === 'undefined') {
   throw new Error('Web Crypto API is required but not available in this environment');
 }
 
+import pako from "pako";
 import { wasmBase64 } from '../webassembly/wasm-base64';
 
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -776,7 +777,8 @@ export async function loadWasm(): Promise<MlKemBrowser> {
     createGoRuntime();
   }
 
-  const wasmBytes = base64ToUint8Array(wasmBase64);
+  const compressedBytes = base64ToUint8Array(wasmBase64);
+  const wasmBytes = pako.ungzip(compressedBytes);
   console.log("wasmBytes length", wasmBytes.length);
   if (!wasmBytes || wasmBytes.length === 0) {
     throw new Error('WASM bytes are empty! Check your base64 conversion and file generation.');
