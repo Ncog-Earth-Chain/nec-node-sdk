@@ -1,6 +1,6 @@
 {
   "name": "necjs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "NECJS SDK for NCOG Earth Chain RPC",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
