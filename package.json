@@ -80,8 +80,7 @@
     "rollup-plugin-typescript2": "^0.36.0",
     "stream-browserify": "^3.0.0",
     "ts-jest": "^29.0.0",
-    "typescript": "^5.0.0",
-    "zlib": "^1.0.5"
+    "typescript": "^5.0.0"
   },
   "files": [
     "dist/",
