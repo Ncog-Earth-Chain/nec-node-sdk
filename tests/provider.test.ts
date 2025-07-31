@@ -174,9 +174,10 @@ describe('Provider', () => {
     let provider: Provider;
     beforeEach(() => {
       provider = new Provider(url);
+      jest.resetModules();
     });
     it('returns address on success', async () => {
-      jest.mock('ethers', () => ({ utils: { namehash: jest.fn().mockReturnValue('0xnode') } }));
+      jest.doMock('ethers', () => ({ namehash: jest.fn().mockReturnValue('0xnode') }));
       provider.call = jest.fn()
         .mockResolvedValueOnce('0xresolver')
         .mockResolvedValueOnce('0xaddress');
