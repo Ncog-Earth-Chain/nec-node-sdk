@@ -1,139 +1,79 @@
-# NECJS SDK – React Native Support Guide
+# React Native Integration
 
-This guide explains how to use the NECJS SDK in a React Native project. React Native is not natively supported by Node.js or browser-only JavaScript packages, so some extra steps are required to make everything work smoothly.
+This SDK provides a React Native specific export that excludes wallet and MLKEM functionality for better compatibility with React Native environments.
 
----
+## Installation
 
-## 1. Installation
-
-Install the SDK and required polyfills:
-
-```sh
+```bash
 npm install necjs
-npm install node-libs-react-native react-native-crypto react-native-randombytes path-browserify react-native-level-fs react-native-quick-crypto react-native-webcrypto buffer
 ```
 
-If you are using React Native < 0.60, link native modules:
-
-```sh
-react-native link react-native-randombytes
+### Import
+```javascript
+// React Native will automatically use the React Native specific export
+import { Provider, Contract, ContractFactory } from 'necjs';
 ```
 
----
+### Available Exports
 
-## 2. Configure Polyfills
+The React Native version includes:
 
-Add this at the very top of your `index.js` (or your main entry file):
+- **Provider** - RPC provider for connecting to NCOG Earth Chain
+- **Contract** - Smart contract interaction
+- **ContractFactory** - Contract deployment and factory patterns
+- **Subscription** - WebSocket subscription handling
+- **Utility functions** - All utility functions for address validation, unit conversion, etc.
+- **GraphQL functions** - `getAllTransactions`, `getAllTokens`
 
-```js
-import 'node-libs-react-native/globals';
+### Example
+
+```javascript
+import { Provider, Contract } from 'necjs';
+
+// Create a provider
+const provider = new Provider('https://rpc.ncog.earth');
+
+// Create a contract instance
+const contract = new Contract(contractAddress, abi, provider);
+
+// Call contract methods
+const result = await contract.methods.someFunction().call();
 ```
 
----
+## Differences from Full SDK
 
-## 3. Update Metro Bundler Configuration
+The React Native version excludes:
+- `Wallet` class and wallet management
+- `Signer` interface and implementations
+- `loadWasm` and `loadWasmFromBuffer` functions
+- `MlKem` type and MLKEM-related functionality
 
-Create or update `metro.config.js` in your project root:
+This makes the bundle smaller and avoids compatibility issues with React Native's JavaScript runtime.
 
-```js
-const path = require('path');
-const { getDefaultConfig } = require('metro-config');
-const nodeLibs = require('node-libs-react-native');
+## React Native Android Wallet Integration
 
-module.exports = (async () => {
-  const config = await getDefaultConfig(__dirname);
+For React Native Android applications that require wallet functionality (private key management, transaction signing, and smart contract interactions), you can integrate the native AAR library. This provides full wallet capabilities while maintaining React Native compatibility.
 
-  const { assetExts, sourceExts } = config.resolver;
+### AAR Integration Guide
 
-  return {
-    ...config,
-    resolver: {
-      ...config.resolver,
-      assetExts: assetExts.filter(ext => ext !== 'wasm' && ext !== 'svg'),
-      sourceExts: [...sourceExts, 'wasm', 'svg', 'ts', 'tsx', 'jsx'],
-      extraNodeModules: {
-        ...nodeLibs,
-        buffer: require.resolve('buffer/'),
-        process: require.resolve('process/browser'),
-        crypto: require.resolve('react-native-crypto'),
-        path: require.resolve('path-browserify'),
-        fs: require.resolve('react-native-level-fs'),
-        stream: require.resolve('readable-stream'),
-      },
-    }
-  };
-})();
-```
+For complete setup instructions, native module bridging, and implementation examples, see:
 
----
+**[React Native Android AAR Integration Guide](AAR_INTEGRATION_GUIDE.md)**
 
-## 4. Usage Example
+The AAR integration guide includes:
+- Step-by-step AAR library integration
+- Native module bridge implementation (Kotlin)
+- React Native component examples
+- Security considerations and error handling
+- Troubleshooting for React Native specific issues
 
-Here is a minimal example of using NECJS in a React Native component:
+### Quick Start for AAR Integration
 
-```js
-import React, { useEffect, useState } from 'react';
-import { View, Text } from 'react-native';
-import { Provider, Wallet } from 'necjs';
+1. **Install the SDK**: `npm install necjs`
+2. **Get AAR file**: [mobile_apps.aar](https://github.com/Ncog-Earth-Chain/nec-node-sdk/) from the project root directory
+3. **Add AAR file**: Place `mobile_apps.aar` in `android/app/libs/`
+4. **Configure build.gradle**: Add dependencies and flatDir repository
+5. **Create native bridge**: Implement Kotlin native module
+6. **Use in React Native**: Import and use the native wallet module
 
-export default function App() {
-  const [balance, setBalance] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const wallet = await Wallet.create('your-private-key-hex');
-        const provider = new Provider('https://rpc.ncog.earth');
-        const bal = await provider.getBalance(wallet.address);
-        setBalance(bal);
-      } catch (e) {
-        console.error('NECJS error:', e);
-      }
-    })();
-  }, []);
-
-  return (
-    <View>
-      <Text>Balance: {balance}</Text>
-    </View>
-  );
-}
-```
-
----
-
-## 5. Troubleshooting
-
-- **Missing module errors:**
-  - Ensure all polyfills are installed and imported as above.
-  - Check your `metro.config.js` for correct configuration.
-- **WASM errors:**
-  - If you see errors about loading WASM, you may need to use a WASM polyfill or patch the loader. See [react-native-webassembly](https://github.com/kripod/react-native-webassembly) for help.
-- **WebSocket issues:**
-  - NECJS should use React Native’s built-in WebSocket. If not, patch the SDK or use a compatible WebSocket library.
-- **Direct import errors (e.g., noble/hashes):**
-  - Only use documented exports from dependencies. Do not import internal files.
-
----
-
-## 6. Caveats & Limitations
-
-- **Not all Node.js or browser APIs are available in React Native.**
-- **You must use polyfills for Node.js core modules.**
-- **WASM support in React Native is not as robust as in browsers/Node.js.**
-- **Some advanced features may require additional patching or configuration.**
-- **If you encounter issues, check the [NECJS GitHub Issues](https://github.com/Ncog-Earth-Chain/nec-node-sdk/issues) or open a new issue for help.**
-
----
-
-## 7. Resources
-
-- [node-libs-react-native](https://github.com/parshap/node-libs-react-native)
-- [react-native-crypto](https://github.com/mvayngrib/react-native-crypto)
-- [react-native-webassembly](https://github.com/kripod/react-native-webassembly)
-- [Metro Bundler Docs](https://facebook.github.io/metro/)
-- [NECJS GitHub](https://github.com/Ncog-Earth-Chain/nec-node-sdk)
-
----
-
-**If you encounter a specific error, copy the error message and search the above resources or open an issue for help!** 
+For detailed implementation, refer to the [AAR Integration Guide](AAR_INTEGRATION_GUIDE.md). 

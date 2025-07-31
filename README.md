@@ -99,6 +99,27 @@ import { Provider, ExtensionSigner } from 'necjs';
 
 ## 📱 React Native Support
 
+The SDK includes a React Native specific export that excludes wallet and MLKEM functionality for better compatibility:
+
+```javascript
+// React Native automatically uses the optimized export
+import { Provider, Contract, ContractFactory } from 'necjs';
+```
+
+**Features included in React Native:**
+- Provider, Contract, ContractFactory
+- ExtensionSigner (if browser extension is available)
+- All utility functions
+- GraphQL functions
+- WebSocket subscriptions
+
+**Excluded for React Native:**
+- Wallet management and private key handling
+- MLKEM post-quantum cryptography
+- WASM dependencies
+
+See [React Native Integration Guide](docs/REACT_NATIVE.md) for detailed setup instructions.
+
 NECJS can be used in React Native projects with additional configuration and polyfills. While React Native is not natively supported by Node.js or browser-only JavaScript packages, you can follow our step-by-step guide to enable NECJS in your React Native app.
 
 - **Guide:** [React Native Integration Guide](docs/REACT_NATIVE.md)

@@ -1,8 +1,9 @@
+import axios from 'axios';
+import { Interface, Fragment, FunctionFragment, id as keccak256 } from 'ethers';
+
 import { Provider } from './provider';
 import { TxParams } from './extension';
-import { Interface, Fragment, FunctionFragment, id as keccak256 } from 'ethers';
 import { serializeForRpc } from './utils';
-import axios from 'axios';
 import { Subscription } from './subscription';
 
 // Generic signer interface for extension and wallet based signers
@@ -89,6 +90,7 @@ export class Contract {
     call: (options?: Record<string, any>) => Promise<any>;
     send: (options: Record<string, any>) => Promise<string>;
     estimateGas: (options?: Record<string, any>) => Promise<number>;
+    nativeSend: (options?: Record<string, any>) => Promise<TxParams>;
   }> = {};
   public readonly events: Record<string, (options?: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> }) => EventStream> = {};
 
@@ -104,7 +106,8 @@ export class Contract {
         this.methods[methodName] = (...args: any[]) => ({
           call: (options: Record<string, any> = {}) => this.call(methodName, args, options),
           send: (options: Record<string, any>) => this.send(methodName, args, options),
-          estimateGas: (options: Record<string, any> = {}) => this.estimateGas(methodName, args, options)
+          estimateGas: (options: Record<string, any> = {}) => this.estimateGas(methodName, args, options),
+          nativeSend: (options: Record<string, any> = {}) => this.nativeSend(methodName, args, options)
         });
       }
       if (fragment.type === 'event') {
@@ -163,6 +166,16 @@ export class Contract {
     const tx = { to: this.address, data, ...options };
     const rpcTx = serializeForRpc(tx);
     return this.provider.estimateGas(rpcTx as { from?: string; to: string; gas?: string; gasPrice?: string; value?: string; data?: string; });
+  }
+
+  async nativeSend(method: string, params: any[], options: Record<string, any>): Promise<TxParams> {
+    try {
+       const data = this.abiInterface.encodeFunctionData(method, params);
+      const tx = { to: this.address, data, value: '', ...options };
+      return tx as TxParams;
+    } catch (error) {
+      return Promise.reject(new Error('Failed to send raw transaction: ' + (error instanceof Error ? error.message : String(error))));
+    }
   }
 
   /**

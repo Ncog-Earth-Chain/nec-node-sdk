@@ -43,7 +43,7 @@ export class ContractFactory {
       }
     }
 
-    const { contractAddress, txHash, receipt } = await Contract.deploy({
+    const { contractAddress } = await Contract.deploy({
       abi: this.abi,
       bytecode: this.bytecode,
       provider: this.provider,

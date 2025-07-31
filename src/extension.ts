@@ -11,7 +11,7 @@ export interface TxParams {
   gasLimit?: string;
   gas?: string;
   to: string;
-  value: string;
+  value?: string;
   data?: string;
   chainId?: number;
 }
