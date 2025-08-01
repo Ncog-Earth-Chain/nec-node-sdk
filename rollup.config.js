@@ -101,5 +101,24 @@ export default [
       inlineDynamicImports: true,
     },
     external: ['ws']
+  },
+
+  // ———————— React Native ESM ————————
+  {
+    input: 'src/index.react-native.ts',
+    onwarn: onWarn,
+    plugins: [
+      polyfill(),
+      resolve({ browser: true, preferBuiltins: false }),
+      commonjs({ transformMixedEsModules: true }),
+      json(),
+      typescript(),
+    ],
+    output: {
+      file: 'dist/index.react-native.esm.js',
+      format: 'esm',
+      inlineDynamicImports: true,
+    },
+    external: ['ws']
   }
 ];
