@@ -1,0 +1,8 @@
+framework module "MobileApps" {
+	header "ref.h"
+    header "Mobile_apps.objc.h"
+    header "Universe.objc.h"
+    header "MobileApps.h"
+
+    export *
+}
