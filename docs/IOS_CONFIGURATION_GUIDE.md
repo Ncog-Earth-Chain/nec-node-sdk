@@ -1,4 +1,4 @@
-# iOS Full Configuration Setup Guide
+# IOS Full Configuration Setup Guide
 
 ## Prerequisites
 
