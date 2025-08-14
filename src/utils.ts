@@ -23,6 +23,7 @@ export function hexToDecimalString(hex: string): string | number {
   if (!/^0x[0-9a-f]+$/.test(normalized)) {
     throw new Error(`hexToDecimalString: invalid hex string "${hex}"`);
   }
+  if (normalized === '0x0') return 0; // handle zero case
   const asDec = BigInt(normalized).toString(10);
   return isNaN(Number(asDec)) ? asDec : Number(asDec);
 }
@@ -41,6 +42,12 @@ export function normalizeHexField(key: string, hex: string): string {
  * Assumes input is already in base units.
  */
 export function decimalToHex(value: number | string | bigint): string {
+
+  if (!value) return '' as any; // handle null/undefined gracefully
+
+  if (value?.toString()?.startsWith('0x')) {
+    return value as string; // already hex  
+  }
   return '0x' + BigInt(value).toString(16);
 }
 
@@ -57,6 +64,10 @@ export function parseUnits(
     str = value.toFixed(decimals);
   } else {
     str = value.toString();
+  }
+
+  if (str?.startsWith('0x')) {
+    return str; // already hex
   }
 
   const [wholePart, fracPart = ''] = str.split('.');
@@ -194,8 +205,8 @@ export function normalizeResponse(
   for (const [key, val] of Object.entries(resp)) {
     if (typeof val === 'string' && val.startsWith('0x')) {
       if (
-        ['address','hash','from','to','transactionHash','blockHash','contractAddress']
-        .includes(key)
+        /^0x[0-9a-fA-F]{64}$/.test(val) || // 32-byte hash
+        /^0x[0-9a-fA-F]{40}$/.test(val)  // 20-byte address
       ) {
         out[key] = val;
       } else {
