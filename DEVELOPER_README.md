@@ -35,7 +35,6 @@
 ### Package Information
 
 - **Name**: `necjs`
-- **Version**: 1.3.0
 - **License**: MIT
 - **Repository**: https://github.com/Ncog-Earth-Chain/nec-node-sdk
 - **Author**: developer@ncog.earth
@@ -44,10 +43,6 @@
 ---
 
 ## Documentation Index
-
-### Core Documentation
-- [API Reference](docs/API_REFERENCE.md) - Complete API documentation
-- [SDK Entry Point](docs/SDK_ENTRYPOINT.md) - Main exports and entry points
 
 ### Platform-Specific Guides
 - [iOS Configuration Guide](docs/IOS_CONFIGURATION_GUIDE.md) - iOS app integration
@@ -166,6 +161,7 @@ nec-node-sdk/
 ├── dist/                         # Build output
 ├── scripts/                      # Build scripts
 ├── assets/                       # Static assets
+├── mobile_apps.aar               # Android framework
 └── MobileApps.xcframework/       # iOS framework
 ```
 
@@ -233,7 +229,6 @@ nec-node-sdk/
 - [ ] Code linting passes (`npm run lint`)
 - [ ] Build completes successfully (`npm run build`)
 - [ ] Version number is updated in `package.json`
-- [ ] CHANGELOG is updated (if applicable)
 - [ ] Documentation is current
 - [ ] LICENSE file is present
 - [ ] `.npmignore` is properly configured
@@ -635,18 +630,6 @@ The project uses Jest for testing with the following configuration:
 - Verify contract ABI is correct
 - Check contract address is valid
 - Ensure provider is connected to correct network
-
-### Debug Mode
-
-Enable debug logging by setting environment variables:
-
-```bash
-# Enable debug logging
-DEBUG=necjs:* npm start
-
-# Or in browser
-localStorage.setItem('debug', 'necjs:*');
-```
 
 ### Performance Optimization
 
