@@ -22,6 +22,8 @@ import type { Provider } from '../src/provider';
 const mockProvider: jest.Mocked<Provider> = {
   getChainId: jest.fn().mockResolvedValue(1),
   callRpc: jest.fn().mockResolvedValue({ result: '0x1234abcd' }),
+  getTransactionCount: jest.fn().mockResolvedValue(1),
+  getGasPrice: jest.fn().mockResolvedValue('0x1'),
   // ...other methods can be added as needed
 } as any;
 
