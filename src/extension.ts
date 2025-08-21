@@ -115,7 +115,6 @@ export class ExtensionSigner {
       try {
         const sendResponse = await this.injected.request({ method: 'ncog_sendTransaction', params: [txParams] });
         return normalizeResponse(sendResponse.result || sendResponse) as string;
-
       } catch (err) {
         throw new Error('Extension does not sendResponse failed: ' + err);
       }

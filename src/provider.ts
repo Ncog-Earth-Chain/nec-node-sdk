@@ -10,7 +10,7 @@ export class RpcError extends Error {
 
   constructor(message: string, code: number, data?: any) {
     super(`RPC Error: ${message} (code: ${code})`);
-    this.name = 'RpcError';
+    this.name = message;
     this.code = code;
     this.data = data;
   }

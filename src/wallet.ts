@@ -80,6 +80,14 @@ export class Signer {
       txParams.chainId = await this.provider.getChainId();
     }
 
+    if (!txParams?.nonce) {
+      txParams.nonce = await this.provider.getTransactionCount(txParams.from);
+    }
+
+    if (!txParams?.gasPrice) {
+      txParams.gasPrice = await this.provider.getGasPrice();
+    }
+
     if (
       (!txParams.gas && !txParams.gasLimit) ||
       !txParams.gasPrice ||

@@ -66,12 +66,12 @@ export class Signer {
       txParams.chainId = await this.provider.getChainId();
     }
 
-    if (
-      (!txParams.gas && !txParams.gasLimit) ||
-      !txParams.gasPrice ||
-      (txParams.nonce !== undefined && txParams.nonce < 0)
-    ) {
-      throw new Error('Missing required transaction parameters: gasLimit, gasPrice, nonce');
+    if (!txParams?.nonce) {
+      txParams.nonce = await this.provider.getTransactionCount(txParams.from);
+    }
+
+    if (!txParams?.gasPrice) {
+      txParams.gasPrice = await this.provider.getGasPrice();
     }
 
     if (txParams.value && txParams.value != '0x') {
