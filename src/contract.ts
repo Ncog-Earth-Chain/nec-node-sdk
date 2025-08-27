@@ -13,21 +13,21 @@ export interface ISigner {
 }
 
 export function mergeArrayAndKeys(decoded: any, outputs: ReadonlyArray<any>): any {
-  // If outputs are named, merge both index and key access
-  if (outputs.length > 0 && outputs.every(o => o.name)) {
-    const result: any = {};
-    outputs.forEach((o, i) => {
-      result[i] = decoded[i];
-      if (o.name) result[o.name] = decoded[i];
-    });
-    // If decoded is a Proxy/Result, also copy any extra properties
-    for (const key in decoded) {
-      if (!result.hasOwnProperty(key)) {
-        result[key] = decoded[key];
-      }
-    }
-    return result;
-  }
+  // // If outputs are named, merge both index and key access
+  // if (outputs.length > 0 && outputs.every(o => o.name)) {
+  //   const result: any = {};
+  //   outputs.forEach((o, i) => {
+  //     result[i] = decoded[i];
+  //     if (o.name) result[o.name] = decoded[i];
+  //   });
+  //   // If decoded is a Proxy/Result, also copy any extra properties
+  //   for (const key in decoded) {
+  //     if (!result.hasOwnProperty(key)) {
+  //       result[key] = decoded[key];
+  //     }
+  //   }
+  //   return result;
+  // }
   // If only one output, return it directly
   if (decoded.length === 1) {
     return decoded[0];
@@ -49,7 +49,9 @@ export function toPlainObject(result: any, outputs?: any): any {
 
   // If outputs is a tuple (struct)
   if (Array.isArray(result) && outputs && outputs.baseType === 'tuple' && Array.isArray(outputs.components)) {
-    const obj: any = {};
+      const obj: any = {
+        ...result
+      };
     outputs.components.forEach((comp: any, i: number) => {
       obj[comp.name] = toPlainObject(result[i], comp);
     });
@@ -62,7 +64,9 @@ export function toPlainObject(result: any, outputs?: any): any {
 
   // If result is an object (ethers.js Result/Proxy)
   if (result && typeof result === 'object') {
-    const obj: any = {};
+    const obj: any = {
+      ...result
+    };
     for (const key in result) {
       if (
         Object.prototype.hasOwnProperty.call(result, key) &&
@@ -92,7 +96,13 @@ export class Contract {
     estimateGas: (options?: Record<string, any>) => Promise<number>;
     nativeSend: (options?: Record<string, any>) => Promise<TxParams>;
   }> = {};
-  public readonly events: Record<string, (options?: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> }) => EventStream> = {};
+  public readonly events: Record<string, (options?: { 
+    fromBlock?: string | number; 
+    toBlock?: string | number; 
+    filter?: Record<string, any>;
+    pollingInterval?: number;
+    enablePolling?: boolean;
+  }) => EventStream> = {};
 
   constructor(address: string, abi: any[], provider: Provider, signer?: ISigner) {
     this.address = address;
@@ -294,15 +304,34 @@ export class Contract {
 export class EventStream {
   private contract: Contract;
   private eventName: string;
-  private options: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> };
+  private options: { 
+    fromBlock?: string | number; 
+    toBlock?: string | number; 
+    filter?: Record<string, any>;
+    pollingInterval?: number;
+    enablePolling?: boolean;
+  };
   private subscription?: Subscription;
   private listeners: { [event: string]: Function[] } = {};
   private active = false;
+  private pollingInterval?: NodeJS.Timeout;
+  private lastBlockNumber: number = 0;
+  private usePolling: boolean = false;
 
-  constructor(contract: Contract, eventName: string, options: { fromBlock?: string | number; toBlock?: string | number; filter?: Record<string, any> }) {
+  constructor(contract: Contract, eventName: string, options: { 
+    fromBlock?: string | number; 
+    toBlock?: string | number; 
+    filter?: Record<string, any>;
+    pollingInterval?: number;
+    enablePolling?: boolean;
+  }) {
     this.contract = contract;
     this.eventName = eventName;
-    this.options = options;
+    this.options = {
+      pollingInterval: 5000, // Default 5 seconds
+      enablePolling: true,   // Enable polling fallback by default
+      ...options
+    };
   }
 
   on(event: 'data' | 'changed' | 'error', handler: Function): this {
@@ -333,6 +362,7 @@ export class EventStream {
       this.emit('error', new Error('Event fragment not found for ' + this.eventName));
       return;
     }
+    
     // Use ethers.utils.id to hash the event signature string
     const topic = keccak256(eventFragment.format());
     const filter = {
@@ -342,25 +372,143 @@ export class EventStream {
       fromBlock: this.options.fromBlock || 'latest',
       toBlock: this.options.toBlock || 'latest',
     };
-    this.subscription = new Subscription((this.contract.provider as any).url.replace(/^http/, 'ws'));
-    await this.subscription.connect();
-    const subId = await this.subscription.subscribe('logs', [filter], (log: any) => {
-      try {
-        const parsed = iface.parseLog(log);
-        if (parsed) {
-          this.emit('data', { ...log, event: this.eventName, returnValues: parsed.args });
+
+    // Try WebSocket connection first, fallback to polling
+    await this.tryWebSocketConnection(filter, iface);
+  }
+
+  private async tryWebSocketConnection(filter: any, iface: any) {
+    try {
+      const url = (this.contract.provider as any).url;
+      
+      const socketUrls = [
+        url.replace(/\/api$/, '').replace(/^http/, 'ws').replace(/^https/, 'wss'),
+        url.replace(/^http/, 'ws').replace(/^https/, 'wss')
+      ];
+
+      for (const socketUrl of socketUrls) {
+        try {
+          this.subscription = new Subscription(socketUrl);
+          await this.subscription.connect();
+          
+          await this.subscription.subscribe('logs', [filter], (log: any) => {
+            try {
+              const parsed = iface.parseLog(log);
+              if (parsed) {
+                this.emit('data', { ...log, event: this.eventName, returnValues: parsed.args });
+              }
+            } catch (err) {
+              this.emit('error', err);
+            }
+          });
+
+          this.usePolling = false;
+          return; // Success, exit the function
+                 } catch (error) {
+          if (this.subscription) {
+            await this.subscription.disconnect();
+            this.subscription = undefined;
+          }
         }
-      } catch (err) {
-        this.emit('error', err);
       }
-    });
+
+      // If all WebSocket attempts failed, fallback to polling
+      if (this.options.enablePolling) {
+        await this.startPolling(filter, iface);
+      } else {
+        console.error('❌ WebSocket connection failed and polling is disabled');
+        this.emit('error', new Error('WebSocket connection failed and polling fallback is disabled'));
+      }
+      
+    } catch (error) {
+      console.error('❌ WebSocket connection error:', error);
+      // Fallback to polling
+      if (this.options.enablePolling) {
+        await this.startPolling(filter, iface);
+      } else {
+        this.emit('error', new Error('WebSocket connection failed and polling fallback is disabled'));
+      }
+    }
+  }
+
+  private async startPolling(filter: any, iface: any) {
+    this.usePolling = true;
+    console.log('📡 Starting polling fallback for event listening');
+    
+    // Get current block number as starting point
+    try {
+      const currentBlock = await this.contract.provider.getBlockNumber();
+      this.lastBlockNumber = currentBlock;
+    } catch (error) {
+      console.warn('⚠️ Could not get current block number, starting from 0');
+      this.lastBlockNumber = 0;
+    }
+
+    // Start polling with configured interval
+    this.pollingInterval = setInterval(async () => {
+      if (!this.active) return;
+
+      try {
+        const currentBlock = await this.contract.provider.getBlockNumber();
+        
+        // Only poll if there are new blocks
+        if (currentBlock > this.lastBlockNumber) {
+          const fromBlock = this.lastBlockNumber + 1;
+          const toBlock = currentBlock;
+          
+          // Get logs for the new blocks
+          const logs = await this.contract.provider.getLogs({
+            ...filter,
+            fromBlock,
+            toBlock
+          });
+
+          // Process each log
+          for (const log of logs) {
+            try {
+              const parsed = iface.parseLog(log);
+              if (parsed) {
+                this.emit('data', { ...log, event: this.eventName, returnValues: parsed.args });
+              }
+            } catch (err) {
+              // Skip logs that don't match our event
+            }
+          }
+
+          this.lastBlockNumber = currentBlock;
+        }
+      } catch (error) {
+        console.error('❌ Polling error:', error);
+        this.emit('error', error);
+      }
+    }, this.options.pollingInterval); // Poll with configured interval
   }
 
   async stop() {
     this.active = false;
+    
+    // Stop WebSocket subscription
     if (this.subscription) {
       await this.subscription.disconnect();
       this.subscription = undefined;
     }
+    
+    // Stop polling interval
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = undefined;
+    }
+    
+    console.log('🛑 Event stream stopped');
+  }
+
+  // Get connection status
+  getConnectionStatus() {
+    return {
+      active: this.active,
+      usePolling: this.usePolling,
+      hasSubscription: !!this.subscription,
+      hasPollingInterval: !!this.pollingInterval
+    };
   }
 }

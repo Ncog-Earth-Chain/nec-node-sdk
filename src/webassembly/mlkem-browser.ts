@@ -779,7 +779,6 @@ export async function loadWasm(): Promise<MlKemBrowser> {
 
   const compressedBytes = base64ToUint8Array(wasmBase64);
   const wasmBytes = pako.ungzip(compressedBytes);
-  console.log("wasmBytes length", wasmBytes.length);
   if (!wasmBytes || wasmBytes.length === 0) {
     throw new Error('WASM bytes are empty! Check your base64 conversion and file generation.');
   }
