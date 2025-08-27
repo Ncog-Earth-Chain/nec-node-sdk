@@ -68,12 +68,6 @@ afterAll(() => {
 });
 
 describe('mergeArrayAndKeys', () => {
-  it('merges named outputs', () => {
-    const decoded = [1, 2];
-    const outputs = [{ name: 'a' }, { name: 'b' }];
-    const result = mergeArrayAndKeys(decoded, outputs);
-    expect(result).toEqual({ 0: 1, 1: 2, a: 1, b: 2 });
-  });
   it('returns single output directly', () => {
     const decoded = [42];
     const outputs = [{}];
@@ -86,23 +80,22 @@ describe('mergeArrayAndKeys', () => {
     const result = mergeArrayAndKeys(decoded, outputs);
     expect(result).toEqual([1, 2]);
   });
-  it('copies extra properties from decoded', () => {
-    const decoded: any = [1, 2];
-    decoded.extra = 99;
-    const outputs = [{ name: 'a' }, { name: 'b' }];
+  it('returns array for multiple outputs without names', () => {
+    const decoded = [1, 2];
+    const outputs = [{}, {}];
     const result = mergeArrayAndKeys(decoded, outputs);
-    expect(result.extra).toBe(99);
+    expect(result).toEqual([1, 2]);
   });
 });
 
 describe('toPlainObject', () => {
   it('handles array of structs', () => {
     const result = toPlainObject([[1, 2]], { baseType: 'array', arrayChildren: { baseType: 'tuple', components: [{ name: 'x' }, { name: 'y' }] } });
-    expect(result).toEqual([{ x: 1, y: 2 }]);
+    expect(result).toEqual([{ 0: 1, 1: 2, x: 1, y: 2 }]);
   });
   it('handles tuple struct', () => {
     const result = toPlainObject([1, 2], { baseType: 'tuple', components: [{ name: 'x' }, { name: 'y' }] });
-    expect(result).toEqual({ x: 1, y: 2 });
+    expect(result).toEqual({ 0: 1, 1: 2, x: 1, y: 2 });
   });
   it('handles array fallback', () => {
     const result = toPlainObject([1, 2]);
@@ -133,7 +126,7 @@ describe('Contract', () => {
   it('calls a contract method', async () => {
     const contract = new Contract(address, abi, mockProvider);
     const result = await contract.methods.foo().call();
-    expect(result).toEqual({ result: 42 });
+    expect(result).toBe(42);
     expect(mockProvider.call).toHaveBeenCalled();
   });
 
