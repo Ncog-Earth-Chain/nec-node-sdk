@@ -35,8 +35,6 @@ Includes post-quantum cryptography, wallet management, contract interaction, ext
 - [Node.js Integration](docs/NODEJS_INTEGRATION.md) - Node.js specific setup
 - [NestJS Integration](docs/NESTJS_INTEGRATION.md) - NestJS framework integration
 - [React Native Setup Guide](docs/REACT_NATIVE_SETUP_GUIDE.md) - React Native integration
-- [iOS Configuration Guide](docs/IOS_CONFIGURATION_GUIDE.md) - iOS app integration
-- [AAR Integration Guide](docs/AAR_INTEGRATION_GUIDE.md) - Android AAR integration
 
 ### Function Reference Documentation
 - [Provider Function Reference](docs/PROVIDER_FUNCTION_REFERENCE.md) - JSON-RPC client functions

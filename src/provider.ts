@@ -47,6 +47,12 @@ export class Provider {
    * @param url The URL of the JSON-RPC endpoint (e.g., "http://localhost:8545").
    */
   constructor(url: string) {
+    if (url.includes('http')) {
+        let leftPart = url.split('//')[1];
+      if (leftPart.startsWith('wsapi')) {
+        url = url + '/api';
+      }
+    }
     this.url = url;
   }
 

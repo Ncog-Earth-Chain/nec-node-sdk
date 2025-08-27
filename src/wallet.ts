@@ -103,6 +103,7 @@ export class Signer {
         JSON.stringify(sendResponse.error)
       );
     }
+    await new Promise(resolve => setTimeout(resolve, 1000));
     return normalizeResponse(sendResponse?.result || sendResponse) as string; // returns tx hash
   }
 
