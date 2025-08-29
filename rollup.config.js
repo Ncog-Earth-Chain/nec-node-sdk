@@ -64,7 +64,14 @@ export default [
     input: 'src/index.browser.ts',
     onwarn: onWarn,
     plugins: [
-      polyfill(),
+      polyfill({
+        globals: {
+          BigInt: 'BigInt',
+          global: 'global',
+          process: 'process',
+          Buffer: 'Buffer'
+        }
+      }),
       resolve({ browser: true, preferBuiltins: false }),
       commonjs({ transformMixedEsModules: true }),
       json(),
@@ -88,7 +95,14 @@ export default [
     input: 'src/index.browser.ts',
     onwarn: onWarn,
     plugins: [
-      polyfill(),
+      polyfill({
+        globals: {
+          BigInt: 'BigInt',
+          global: 'global',
+          process: 'process',
+          Buffer: 'Buffer'
+        }
+      }),
       resolve({ browser: true, preferBuiltins: false }),
       commonjs({ transformMixedEsModules: true }),
       json(),
@@ -108,7 +122,14 @@ export default [
     input: 'src/index.react-native.ts',
     onwarn: onWarn,
     plugins: [
-      polyfill(),
+      polyfill({
+        globals: {
+          BigInt: 'BigInt',
+          global: 'global',
+          process: 'process',
+          Buffer: 'Buffer'
+        }
+      }),
       resolve({ browser: true, preferBuiltins: false }),
       commonjs({ transformMixedEsModules: true }),
       json(),

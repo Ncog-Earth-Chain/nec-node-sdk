@@ -1,13 +1,59 @@
 // src/utils.ts
 
+// Ensure BigInt is available (polyfill check)
+if (typeof BigInt === 'undefined') {
+  throw new Error('BigInt is not supported in this environment. Please use a polyfill or upgrade your JavaScript engine.');
+}
+
+// Check for BigInt ** operator support
+let BIGINT_EXPONENTIATION_SUPPORTED = true;
+try {
+  BigInt(2) ** BigInt(3);
+} catch (error) {
+  BIGINT_EXPONENTIATION_SUPPORTED = false;
+}
+
 // Generic base for decimal handling
 const TEN = BigInt(10);
 // Default number of decimals (e.g., for Ether or NEC token)
 export const DEFAULT_DECIMALS = 18;
 // NEC token decimals (replace if different)
 export const NEC_DECIMALS = 18;
+
+// Safe BigInt exponentiation function to handle browser compatibility issues
+function safeBigIntPow(base: bigint, exponent: bigint): bigint {
+  if (BIGINT_EXPONENTIATION_SUPPORTED) {
+    try {
+      return base ** exponent;
+    } catch (error) {
+      // Fall through to manual implementation
+    }
+  }
+  
+  // Manual implementation for browsers that don't support BigInt ** operator
+  if (exponent === BigInt(0)) return BigInt(1);
+  if (exponent === BigInt(1)) return base;
+  if (exponent < BigInt(0)) {
+    throw new Error('Negative exponents not supported for BigInt');
+  }
+  
+  let result = BigInt(1);
+  let currentBase = base;
+  let currentExponent = exponent;
+  
+  while (currentExponent > BigInt(0)) {
+    if (currentExponent % BigInt(2) === BigInt(1)) {
+      result = result * currentBase;
+    }
+    currentBase = currentBase * currentBase;
+    currentExponent = currentExponent / BigInt(2);
+  }
+  
+  return result;
+}
+
 // BigInt factor for converting whole units ↔ base units
-export const WEI_FACTOR = TEN ** BigInt(DEFAULT_DECIMALS);
+export const WEI_FACTOR = safeBigIntPow(TEN, BigInt(18));
 
 /**
  * Convert a hex string to a decimal (string or number).
@@ -80,7 +126,7 @@ export function parseUnits(
     );
   }
 
-  const factor = decimals === DEFAULT_DECIMALS ? WEI_FACTOR : TEN ** BigInt(decimals);
+  const factor = decimals === DEFAULT_DECIMALS ? WEI_FACTOR : safeBigIntPow(TEN, BigInt(Number(decimals)));
   const whole = BigInt(wholePart) * factor;
   const frac = BigInt(fracPart.padEnd(decimals, '0'));
   const combined = whole + frac;
@@ -117,7 +163,7 @@ export function formatUnits(
     typeof value === 'string' && value.startsWith('0x')
       ? BigInt(value)
       : BigInt(value);
-  const factor = decimals === DEFAULT_DECIMALS ? WEI_FACTOR : TEN ** BigInt(decimals);
+  const factor = decimals === DEFAULT_DECIMALS ? WEI_FACTOR : safeBigIntPow(TEN, BigInt(Number(decimals)));
   const integer = big / factor;
   const fraction = big % factor;
 
