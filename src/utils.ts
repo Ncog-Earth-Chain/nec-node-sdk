@@ -1,4 +1,6 @@
 // src/utils.ts
+import { sha3_512 } from '@noble/hashes/sha3';
+import { bytesToHex } from '@noble/hashes/utils';
 
 // Ensure BigInt is available (polyfill check)
 if (typeof BigInt === 'undefined') {
@@ -29,18 +31,18 @@ function safeBigIntPow(base: bigint, exponent: bigint): bigint {
       // Fall through to manual implementation
     }
   }
-  
+
   // Manual implementation for browsers that don't support BigInt ** operator
   if (exponent === BigInt(0)) return BigInt(1);
   if (exponent === BigInt(1)) return base;
   if (exponent < BigInt(0)) {
     throw new Error('Negative exponents not supported for BigInt');
   }
-  
+
   let result = BigInt(1);
   let currentBase = base;
   let currentExponent = exponent;
-  
+
   while (currentExponent > BigInt(0)) {
     if (currentExponent % BigInt(2) === BigInt(1)) {
       result = result * currentBase;
@@ -48,7 +50,7 @@ function safeBigIntPow(base: bigint, exponent: bigint): bigint {
     currentBase = currentBase * currentBase;
     currentExponent = currentExponent / BigInt(2);
   }
-  
+
   return result;
 }
 
@@ -298,4 +300,73 @@ export function decimalToWei(
     return BigInt(hex).toString(10);
   }
   throw new Error('decimalToWei: invalid value');
+}
+
+/**
+ * Extract a Kyber public key (ek) from a secret key (dk) hex string.
+ * If input already appears to be a public key (800/1184/1568 bytes), it is returned as-is.
+ * Returns a lowercase hex string without 0x prefix.
+ */
+export function kyberPrivateKeyToEncryptedPublicKeyAddress(skHex: string): string {
+  if (!skHex || !skHex.trim()) {
+    throw new Error('Kyber key is required');
+  }
+
+  const hex = skHex.startsWith('0x') ? skHex.slice(2) : skHex;
+  const bytes = hexToUint8Array(hex);
+  const len = bytes.length;
+
+  // Already a public key? Return as hex
+  if (len === 800 || len === 1184 || len === 1568) {
+    return toHexString(bytes);
+  }
+
+  // Map secret key lengths to parameter k
+  const kByLen: Record<number, number> = { 1632: 2, 2400: 3, 3168: 4 };
+  const k = kByLen[len];
+  if (!k) {
+    throw new Error(`Unsupported Kyber secret key length: ${len}`);
+  }
+
+  const ekOffset = 384 * k;      // byte offset where ek starts
+  const ekLen = 384 * k + 32;    // length of ek
+  const ek = bytes.slice(ekOffset, ekOffset + ekLen);
+  return toHexString(ek);
+}
+
+export function kyberPrivateKeyToPublicKeyAddress(skHex: string): string {
+  const ek = kyberPrivateKeyToEncryptedPublicKeyAddress(skHex);
+  return generateAccountAddress(ek);
+
+}
+
+function generateAccountAddress(publicKey: string): string {
+  try {
+    const hash = sha3_512(new TextEncoder().encode(publicKey));
+    const hashHex = bytesToHex(hash);
+    const accountAddress = `0x${hashHex.slice(-40)}`;
+    return accountAddress;
+  } catch (error) {
+    console.error('Error generating account address:', error);
+    return '';
+  }
+}
+
+// Local helpers for hex/bytes without Node Buffer dependency
+function hexToUint8Array(hexString: string): Uint8Array {
+  const normalized = hexString.trim().toLowerCase();
+  if (!/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) {
+    throw new Error('Invalid hexadecimal string');
+  }
+  const result = new Uint8Array(normalized.length / 2);
+  for (let i = 0; i < normalized.length; i += 2) {
+    result[i / 2] = parseInt(normalized.substr(i, 2), 16);
+  }
+  return result;
+}
+
+function toHexString(byteArray: Uint8Array): string {
+  return Array.from(byteArray)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }

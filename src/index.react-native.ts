@@ -3,5 +3,5 @@ export { Provider } from './provider';
 export { Contract } from './contract';
 export { ContractFactory } from './contract-factory';
 export { Subscription } from './subscription';
-export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther, formatUnits, hexToNec, necToHex, weiToNec, serializeForRpc, normalizeResponse, isValidAddress, decimalToWei } from './utils';
+export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther, formatUnits, hexToNec, necToHex, weiToNec, serializeForRpc, normalizeResponse, isValidAddress, decimalToWei, kyberPrivateKeyToEncryptedPublicKeyAddress, kyberPrivateKeyToPublicKeyAddress } from './utils';
 export { getAllTransactions, getAllTokens } from './graphql';
