@@ -5,5 +5,5 @@ export { InjectedProvider, ExtensionSigner } from './extension';
 export { Subscription } from './subscription';
 export { ContractFactory } from './contract-factory';
 export { loadWasm, loadWasmFromBuffer, type MlKem } from './webassembly/mlkem';
-export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther, formatUnits, hexToNec, necToHex, weiToNec, serializeForRpc, normalizeResponse, isValidAddress, decimalToWei, kyberPrivateKeyToEncryptedPublicKeyAddress, kyberPrivateKeyToPublicKeyAddress } from './utils';
+export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther, formatUnits, hexToNec, necToHex, weiToNec, serializeForRpc, normalizeResponse, isValidAddress, decimalToWei, kyberPrivateKeyToEncryptedPublicKeyAddress, kyberPrivateKeyToPublicKeyAddress, signMessageMLDSA, verifyMLDSASignature, generateMLDSAKeyPair, mldsaPublicKeyToAddress } from './utils';
 export { getAllTransactions, getAllTokens } from './graphql';
