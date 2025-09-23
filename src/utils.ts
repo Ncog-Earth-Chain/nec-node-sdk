@@ -1,5 +1,5 @@
 // src/utils.ts
-import { sha3_512 } from '@noble/hashes/sha3';
+import { sha3_512, keccak_256 } from '@noble/hashes/sha3';
 import { bytesToHex } from '@noble/hashes/utils';
 
 // Ensure BigInt is available (polyfill check)
@@ -337,7 +337,131 @@ export function kyberPrivateKeyToEncryptedPublicKeyAddress(skHex: string): strin
 export function kyberPrivateKeyToPublicKeyAddress(skHex: string): string {
   const ek = kyberPrivateKeyToEncryptedPublicKeyAddress(skHex);
   return generateAccountAddress(ek);
+}
 
+function generateWalletAddress(publicKey: string): string {
+  const uint8PublicKey = hexToUint8Array(publicKey);
+  const hash = keccak_256(uint8PublicKey);
+  const addrBuf = hash.slice(12);
+  return '0x' + bytesToHex(addrBuf);
+}
+
+export function mldsaPublicKeyToAddress(publicKey: string): string {
+  return generateWalletAddress(publicKey);
+}
+
+/**
+ * Sign a message using MLDSA with a private key.
+ * @param message - The message to sign
+ * @param privateKey - The private key to sign with (hex string)
+ * @param algorithm - The MLDSA algorithm to use ('ml_dsa44', 'ml_dsa65', or 'ml_dsa87')
+ * @returns Promise<string> - The signature as a hex string
+ */
+export async function signMessageMLDSA(
+  message: string,
+  privateKey: string,
+  algorithm: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87' = 'ml_dsa87'
+): Promise<string> {
+  try {
+    // Import the noble-post-quantum library
+    // @ts-ignore - noble-post-quantum.js is a bundled JS file without TypeScript declarations
+    const noblePQ = await import('./noble-post-quantum.js') as any;
+    const algorithms = noblePQ.default || noblePQ;
+
+    // Get the MLDSA algorithm
+    const mldsa = algorithms[algorithm];
+    if (!mldsa) {
+      throw new Error(`Unsupported MLDSA algorithm: ${algorithm}`);
+    }
+
+    // Convert hex private key to Uint8Array
+    const privateKeyBytes = hexToUint8Array(privateKey);
+
+    // Convert message to Uint8Array
+    const messageBytes = new TextEncoder().encode(message);
+
+    // Sign the message
+    const signature = mldsa.sign(privateKeyBytes, messageBytes);
+
+    // Convert signature to hex string
+    return toHexString(signature);
+  } catch (error) {
+    console.error('Error signing message with MLDSA:', error);
+    throw error;
+  }
+}
+
+/**
+ * Verify an MLDSA signature against a message and public key.
+ * @param message - The original message that was signed
+ * @param signature - The MLDSA signature (hex string)
+ * @param publicKey - The public key to verify against (hex string)
+ * @param algorithm - The MLDSA algorithm to use ('ml_dsa44', 'ml_dsa65', or 'ml_dsa87')
+ * @returns Promise<boolean> - True if signature is valid, false otherwise
+ */
+export async function verifyMLDSASignature(
+  message: string,
+  signature: string,
+  publicKey: string,
+  algorithm: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87' = 'ml_dsa87'
+): Promise<boolean> {
+  try {
+    // Import the noble-post-quantum library
+    // @ts-ignore - noble-post-quantum.js is a bundled JS file without TypeScript declarations
+    const noblePQ = await import('./noble-post-quantum.js') as any;
+    const algorithms = noblePQ.default || noblePQ;
+
+    // Get the MLDSA algorithm
+    const mldsa = algorithms[algorithm];
+    if (!mldsa) {
+      throw new Error(`Unsupported MLDSA algorithm: ${algorithm}`);
+    }
+
+    // Convert hex strings to Uint8Arrays
+    const publicKeyBytes = hexToUint8Array(publicKey);
+    const signatureBytes = hexToUint8Array(signature);
+    const messageBytes = new TextEncoder().encode(message);
+
+    // Verify the signature
+    return mldsa.verify(publicKeyBytes, messageBytes, signatureBytes);
+  } catch (error) {
+    console.error('Error verifying MLDSA signature:', error);
+    return false;
+  }
+}
+
+/**
+ * Generate a new MLDSA key pair.
+ * @param algorithm - The MLDSA algorithm to use ('ml_dsa44', 'ml_dsa65', or 'ml_dsa87')
+ * @returns Promise<{publicKey: string, privateKey: string}> - The key pair as hex strings
+ */
+export async function generateMLDSAKeyPair(
+  algorithm: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87' = 'ml_dsa87'
+): Promise<{ publicKey: string, privateKey: string }> {
+  try {
+    // Import the noble-post-quantum library
+    // @ts-ignore - noble-post-quantum.js is a bundled JS file without TypeScript declarations
+    const noblePQ = await import('./noble-post-quantum.js') as any;
+    const algorithms = noblePQ.default || noblePQ;
+
+    // Get the MLDSA algorithm
+    const mldsa = algorithms[algorithm];
+    if (!mldsa) {
+      throw new Error(`Unsupported MLDSA algorithm: ${algorithm}`);
+    }
+
+    // Generate key pair
+    const keyPair = mldsa.keygen();
+
+    // Convert to hex strings
+    return {
+      publicKey: toHexString(keyPair.publicKey),
+      privateKey: toHexString(keyPair.secretKey)
+    };
+  } catch (error) {
+    console.error('Error generating MLDSA key pair:', error);
+    throw error;
+  }
 }
 
 function generateAccountAddress(publicKey: string): string {
