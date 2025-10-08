@@ -464,6 +464,63 @@ export async function generateMLDSAKeyPair(
   }
 }
 
+/**
+ * Derive or validate an MLDSA public key from a provided key hex.
+ * - If the provided hex already looks like a public key for the given algorithm, it is returned (lowercase, no 0x).
+ * - If it looks like a secret key for the given algorithm, deriving the public key is not supported by the
+ *   current bundled API. In this case, an error is thrown with guidance to persist the public key at keygen time.
+ *
+ * Note: MLDSA secret keys (Dilithium) in this bundle do not embed the public key; reconstructing requires internal
+ * primitives that are not exported. Persist the `publicKey` from `generateMLDSAKeyPair` alongside the `privateKey`.
+ */
+export async function mldsaPrivateKeyToPublicKey(
+  keyHex: string,
+  algorithm: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87' = 'ml_dsa87'
+): Promise<string> {
+  if (!keyHex || !keyHex.trim()) throw new Error('mldsaPrivateKeyToPublicKey: key is required');
+  const hex = keyHex.startsWith('0x') ? keyHex.slice(2) : keyHex;
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
+    throw new Error('mldsaPrivateKeyToPublicKey: invalid hex');
+  }
+
+  // Known MLDSA (Dilithium) key lengths (bytes) for common modes
+  const PUBLIC_KEY_LENGTHS: Record<typeof algorithm, number> = {
+    ml_dsa44: 1312, // Dilithium2
+    ml_dsa65: 1952, // Dilithium3
+    ml_dsa87: 2592  // Dilithium5
+  } as const;
+  const SECRET_KEY_LENGTHS: Record<typeof algorithm, number> = {
+    // Lengths reflect this bundle's encoding (TR_BYTES = 64), which differ from some specs
+    ml_dsa44: 2560, // Dilithium2
+    ml_dsa65: 4032, // Dilithium3
+    ml_dsa87: 4896  // Dilithium5
+  } as const;
+
+  const byteLen = hex.length / 2;
+  if (byteLen === PUBLIC_KEY_LENGTHS[algorithm]) {
+    return hex;
+  }
+  if (byteLen === SECRET_KEY_LENGTHS[algorithm]) {
+    // Try deriving via non-standard helper exposed by bundled implementation
+    // @ts-ignore - bundled JS without types
+    const noblePQ = await import('./noble-post-quantum.js') as any;
+    const algorithms = noblePQ.default || noblePQ;
+    const mldsa = algorithms[algorithm];
+    if (!mldsa || typeof mldsa.derivePublicKey !== 'function') {
+      throw new Error('mldsaPrivateKeyToPublicKey: derivation not available in bundled implementation');
+    }
+    const sk = hexToUint8Array(hex);
+    const pkBytes = mldsa.derivePublicKey(sk);
+    const pkHex = toHexString(pkBytes);
+    return pkHex;
+  }
+
+  throw new Error(
+    `mldsaPrivateKeyToPublicKey: unexpected key length (${byteLen} bytes) for ${algorithm}. ` +
+    'Provide a valid MLDSA public key or the original keypair output.'
+  );
+}
+
 function generateAccountAddress(publicKey: string): string {
   try {
     const hash = sha3_512(new TextEncoder().encode(publicKey));

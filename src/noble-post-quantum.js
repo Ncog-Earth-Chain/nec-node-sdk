@@ -1350,6 +1350,29 @@ var noblePostQuantum = (() => {
       },
       verify: (publicKey, msg, sig, ctx = EMPTY) => {
         return internal.verify(publicKey, getMessage(msg, ctx), sig);
+      },
+      // non-standard helper: derive public key from secret key
+      derivePublicKey: (secretKey) => {
+        const [rho, _K, _tr, s1, s2, t0] = secretCoder.decode(secretKey);
+        const xof = XOF1282(rho);
+        const s1Hat = s1.map((i) => NTT2.encode(i.slice()));
+        const t1 = [];
+        const t = newPoly(N2);
+        for (let i = 0; i < K; i++) {
+          t.fill(0);
+          for (let j = 0; j < L; j++) {
+            const aij = RejNTTPoly(xof.get(j, i));
+            polyAdd2(t, MultiplyNTTs2(aij, s1Hat[j]));
+          }
+          NTT2.decode(t);
+          const r = polyAdd2(t, s2[i]);
+          const { r1 } = polyPowerRound(r);
+          t1.push(r1);
+        }
+        xof.clean();
+        s1Hat.forEach((p) => p.fill(0));
+        t.fill(0);
+        return publicCoder.encode([rho, t1]);
       }
     };
   }
