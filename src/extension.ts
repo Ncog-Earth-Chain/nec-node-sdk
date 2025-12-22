@@ -80,10 +80,10 @@ export class ExtensionSigner {
  * @returns A promise that resolves to the transaction hash.
  */
   async sendTransaction(tx: TxParams): Promise<string> {
-    const from = await this.getAddress();
-    if (!from) {
-      throw new Error("Cannot send transaction: no address is selected in the wallet.");
-    }
+    // const from = await this.getAddress();
+    // if (!from) {
+    //   throw new Error("Cannot send transaction: no address is selected in the wallet.");
+    // }
 
     // Required fields validation
     const requiredFields = ['to', 'value', 'gasPrice'];
@@ -99,10 +99,10 @@ export class ExtensionSigner {
 
     // Only include acceptable fields
     const txParams: Record<string, any> = {
-      from,
       to: tx.to,
       value: tx.value,
     };
+    if (tx.from !== undefined) txParams.from = tx.from;
     if (tx.data !== undefined) txParams.data = tx.data;
     if (tx.gasLimit !== undefined) txParams.gas = tx.gasLimit;
     if (tx.gasPrice !== undefined) txParams.gasPrice = tx.gasPrice;
