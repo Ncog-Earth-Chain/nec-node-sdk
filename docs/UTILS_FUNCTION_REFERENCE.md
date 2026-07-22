@@ -38,23 +38,6 @@
 const decimal = hexToDecimalString('0x1bc16d674ec80000'); // Returns 2000000000000000000
 ```
 
-### normalizeHexField
-
-**Function:** `normalizeHexField(key: string, hex: string): string`
-
-**Description:** Convert a hex string to a decimal-string (no extra multiplication). Use for normalizing RPC response fields already in base units.
-
-**Input Parameters:**
-- `key` (string): Field key (for context)
-- `hex` (string): Hexadecimal string to normalize
-
-**Response:** `string` - Normalized decimal string
-
-**Example:**
-```typescript
-const normalized = normalizeHexField('balance', '0x1bc16d674ec80000'); // Returns '2000000000000000000'
-```
-
 ### decimalToHex
 
 **Function:** `decimalToHex(value: number | string | bigint): string`
@@ -276,6 +259,134 @@ const isValid = isValidAddress('0x1234567890123456789012345678901234567890'); //
 const isInvalid = isValidAddress('invalid-address'); // Returns false
 ```
 
+## Cryptography helpers
+
+Post-quantum key/address helpers and EIP-191 personal-message signing, all exported from
+`necjs`. Transaction signing lives in [TX_SIGNER_FUNCTION_REFERENCE.md](TX_SIGNER_FUNCTION_REFERENCE.md);
+these are the account-key and message-signing helpers.
+
+> The `algorithm` argument defaults to `'ml_dsa87'` and also accepts `'ml_dsa44'` / `'ml_dsa65'`.
+> NCOG accounts use ML-DSA-87.
+
+### generateMLDSAKeyPair
+
+**Function:** `generateMLDSAKeyPair(algorithm?: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87'): Promise<{ publicKey: string; privateKey: string }>`
+
+**Description:** Generate a new ML-DSA key pair. Both keys are returned as hex strings (no `0x`
+prefix). ML-DSA secret keys in this bundle do not embed the public key, so persist `publicKey`
+alongside `privateKey` if you will need it later (e.g. for verification).
+
+**Response:** `Promise<{ publicKey: string; privateKey: string }>`
+
+**Example:**
+```typescript
+const { publicKey, privateKey } = await generateMLDSAKeyPair(); // ml_dsa87
+```
+
+### mldsaPublicKeyToAddress
+
+**Function:** `mldsaPublicKeyToAddress(publicKey: string): string`
+
+**Description:** Derive the account address from a raw ML-DSA public key hex, using the chain's
+scheme `address = keccak256(rawPubkeyBytes)[12:]`. Returns a `0x`-prefixed 20-byte address.
+
+**Input Parameters:**
+- `publicKey` (string): Raw ML-DSA public key as a hex string
+
+**Response:** `string` - `0x`-prefixed account address
+
+**Example:**
+```typescript
+const address = mldsaPublicKeyToAddress(publicKey); // '0x....'
+```
+
+### mldsaPrivateKeyToPublicKey
+
+**Function:** `mldsaPrivateKeyToPublicKey(keyHex: string, algorithm?: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87'): Promise<string>`
+
+**Description:** Validate/derive an ML-DSA public key. If `keyHex` already looks like a public key
+for the algorithm it is returned (lowercase, no `0x`). If it is a secret key, derivation depends on
+the bundled implementation and may throw — persist the public key from `generateMLDSAKeyPair` instead.
+
+**Response:** `Promise<string>` - public key hex
+
+**Error Handling:**
+- Throws if the hex is invalid or the length does not match a known key size
+
+### signPersonalMessageMLDSA
+
+**Function:** `signPersonalMessageMLDSA(message: string | Uint8Array, privateKey: string, algorithm?: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87'): Promise<string>`
+
+**Description:** Sign a personal message with ML-DSA-87 over the EIP-191 digest the node verifies
+against (`keccak256("\x19Ethereum Signed Message:\n" + len + msg)`). The resulting signature is
+verifiable via the node's `personal_verifyMessage` (see `Provider.verifyMessage`).
+
+**Input Parameters:**
+- `message` (string | Uint8Array): utf-8 string, `0x`-hex string, or raw bytes
+- `privateKey` (string): ML-DSA private key hex
+- `algorithm` (optional): defaults to `'ml_dsa87'`
+
+**Response:** `Promise<string>` - signature as a hex string (no `0x` prefix, matching the
+`generateMLDSAKeyPair` hex convention; pass it straight back into `verifyPersonalMessageMLDSA`)
+
+### verifyPersonalMessageMLDSA
+
+**Function:** `verifyPersonalMessageMLDSA(message: string | Uint8Array, signature: string, publicKey: string, algorithm?: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87'): Promise<boolean>`
+
+**Description:** Verify an ML-DSA personal-message signature over the EIP-191 digest. Returns `true`
+iff the signature verifies against the message and public key.
+
+**Response:** `Promise<boolean>`
+
+**Round-trip example:**
+```typescript
+import {
+  generateMLDSAKeyPair,
+  signPersonalMessageMLDSA,
+  verifyPersonalMessageMLDSA,
+} from 'necjs';
+
+const { publicKey, privateKey } = await generateMLDSAKeyPair();
+
+const message = 'Hello, NCOG!';
+const signature = await signPersonalMessageMLDSA(message, privateKey);
+
+const ok = await verifyPersonalMessageMLDSA(message, signature, publicKey);
+console.log('signature valid:', ok); // true
+```
+
+### personalTextHash
+
+**Function:** `personalTextHash(message: string | Uint8Array): Uint8Array`
+
+**Description:** Compute the EIP-191 TextHash for a message — the exact 32-byte Keccak-256 digest the
+node's `personal_verifyMessage` checks against. `message` is resolved as: `Uint8Array` used as-is,
+`0x`-hex decoded to bytes, otherwise utf-8 encoded.
+
+**Response:** `Uint8Array` - 32-byte digest
+
+**Example:**
+```typescript
+const digest = personalTextHash('Hello, NCOG!'); // Uint8Array(32)
+```
+
+### kyberPrivateKeyToEncryptedPublicKeyAddress
+
+**Function:** `kyberPrivateKeyToEncryptedPublicKeyAddress(skHex: string): string`
+
+**Description:** Extract the ML-KEM (Kyber) **encapsulation public key** (`ek`) from a Kyber secret
+key hex. If the input already looks like a public key (800 / 1184 / 1568 bytes) it is returned as-is.
+Returns a lowercase hex string **without** a `0x` prefix. This is an encryption (KEM) key — it is
+**not** an account/signing key and must not be used for on-chain identity.
+
+**Input Parameters:**
+- `skHex` (string): Kyber secret key as a hex string
+
+**Response:** `string` - encapsulation public key hex (lowercase, no `0x`)
+
+**Error Handling:**
+- Throws if the key is empty or has an unsupported length
+
 ## Usage Examples
 
 ### Basic Unit Conversions
@@ -358,14 +469,11 @@ console.log(isValidAddress(invalidAddress)); // false
 ### Hex Conversions
 
 ```typescript
-import { hexToDecimalString, decimalToHex, normalizeHexField } from 'necjs';
+import { hexToDecimalString, decimalToHex } from 'necjs';
 
 // Convert hex to decimal
 const decimal = hexToDecimalString('0x1bc16d674ec80000'); // 2000000000000000000
 
 // Convert decimal to hex
 const hex = decimalToHex(2000000000000000000); // '0x1bc16d674ec80000'
-
-// Normalize hex field for RPC responses
-const normalized = normalizeHexField('balance', '0x1bc16d674ec80000'); // '2000000000000000000'
 ``` 

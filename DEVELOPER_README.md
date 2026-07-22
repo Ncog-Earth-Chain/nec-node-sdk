@@ -58,6 +58,7 @@
 - [Extension Function Reference](docs/EXTENSION_FUNCTION_REFERENCE.md) - Browser extension integration
 - [Subscription Function Reference](docs/SUBSCRIPTION_FUNCTION_REFERENCE.md) - WebSocket subscriptions
 - [MLKEM Function Reference](docs/MLKEM_FUNCTION_REFERENCE.md) - Post-quantum cryptography
+- [DDB Function Reference](docs/DDB_FUNCTION_REFERENCE.md) - Decentralized database (`ddb_*`) client
 - [Utils Function Reference](docs/UTILS_FUNCTION_REFERENCE.md) - Utility functions
 - [GraphQL Function Reference](docs/GRAPHQL_FUNCTION_REFERENCE.md) - GraphQL operations
 
@@ -145,15 +146,19 @@ nec-node-sdk/
 │   ├── index.ts                  # Main entry point
 │   ├── index.browser.ts          # Browser-specific entry
 │   ├── index.react-native.ts     # React Native entry
-│   ├── provider.ts               # JSON-RPC client
-│   ├── wallet.ts                 # Wallet management
+│   ├── provider.ts               # JSON-RPC client (+ typed getters & log filters)
+│   ├── wallet.ts                 # Wallet management (Wallet, Signer, TxParams)
+│   ├── wallet.browser.ts         # Browser-specific wallet entry
+│   ├── tx-signer.ts              # WASM-free ML-DSA-87 tx signer (SigVersion-v2)
 │   ├── contract.ts               # Smart contract interaction
 │   ├── contract-factory.ts       # Contract deployment
 │   ├── extension.ts              # Browser extension integration
 │   ├── subscription.ts           # WebSocket subscriptions
+│   ├── ddb.ts                    # Decentralized DB (ddb_*) client
+│   ├── ddb-schema.ts             # Typed DDB contract/schema definitions + validation
 │   ├── graphql.ts                # GraphQL operations
 │   ├── utils.ts                  # Utility functions
-│   └── webassembly/              # WebAssembly modules
+│   └── webassembly/              # WebAssembly modules (ML-KEM)
 ├── docs/                         # Documentation
 ├── tests/                        # Test files
 ├── dist/                         # Build output
@@ -172,8 +177,12 @@ nec-node-sdk/
 
 #### 2. Wallet Module
 - **Purpose**: Private key management and transaction signing
-- **Key Features**: MLKEM cryptography, address derivation, transaction creation
+- **Key Features**: ML-DSA-87 signing, address derivation, transaction creation
 - **Use Cases**: User wallet creation, transaction signing, post-quantum security
+
+##### v2 transaction signing (SigVersion-v2 ML-DSA-87, mandatory chainId)
+- Transactions are signed with **ML-DSA-87** in the SigVersion-v2 wire format by the WASM-free `tx-signer` module (`signTransactionMLDSA87`). `txParams.chainId` is **mandatory** and is bound into the signing digest for replay protection — the `Wallet`/`Signer` flow auto-fetches it via `eth_chainId` (`Provider.getChainId`), but a direct caller of `signTransactionMLDSA87` must supply it.
+- The account address is `keccak256(rawMLDSAPubkeyBytes)[12:]` (`privateKeyToAddress` / `publicKeyToAddress`). There is **no key recovery** for ML-DSA (so `personal_ecRecover` is gone; verify with a supplied public key via `Provider.verifyMessage`).
 
 #### 3. Contract Module
 - **Purpose**: Smart contract interaction and method calling
@@ -196,9 +205,15 @@ nec-node-sdk/
 - **Use Cases**: Real-time updates, event monitoring, notification systems
 
 #### 7. MLKEM Module
-- **Purpose**: Post-quantum cryptography operations
-- **Key Features**: Key generation, encryption/decryption, digital signatures
-- **Use Cases**: Quantum-resistant security, advanced cryptography
+- **Purpose**: Post-quantum key exchange + symmetric encryption (ML-KEM-1024)
+- **Key Features**: Key generation, asymmetric & symmetric encrypt/decrypt (KEM-only — **no** signing here; signing lives in `tx-signer`)
+- **Use Cases**: Quantum-resistant key exchange, message encryption
+
+#### 8. DDB Module
+- **Purpose**: Client for NCOG's decentralized on-chain relational database (`ddb_*` RPC namespace)
+- **Key Features**: Client-signed schema creation / procedure calls / role management (the `*Signed` methods; caller signs with their ML-DSA-87 key and gets an endorsement `requestId`), consensus-free reads (`getSchema` / `select` / `query`), and status/introspection (`getValidators`, `getConsensusStats`, `getStats`)
+- **Use Cases**: On-chain relational data, stored procedures, role-based access
+- **Reference**: [DDB Function Reference](docs/DDB_FUNCTION_REFERENCE.md)
 
 ### Build Process
 
@@ -333,18 +348,18 @@ async function contractExample() {
 import { Provider, ContractFactory, Wallet } from 'necjs';
 
 async function deployContract() {
-  await loadWasm();
-  
-  const wallet = await Wallet.create('0x...');
   const provider = new Provider('https://rpc.ncog.earth');
+  const wallet = await Wallet.create('0x...');
+  const signer = wallet.connect(provider); // ML-DSA-87 signer bound to the provider
   
   // Contract bytecode and ABI
   const contractBytecode = '0x...';
   const contractABI = [...];
   
-  // Deploy contract
-  const factory = new ContractFactory(contractABI, contractBytecode, wallet);
-  const contract = await factory.deploy('Constructor Parameter');
+  // Deploy contract. ContractFactory ctor is (abi, bytecode, provider, signer);
+  // deploy() takes an ARRAY of constructor args and resolves to a Contract instance.
+  const factory = new ContractFactory(contractABI, contractBytecode, provider, signer);
+  const contract = await factory.deploy(['Constructor Parameter']);
   
   console.log('Deployed contract address:', contract.address);
 }
@@ -363,10 +378,12 @@ async function extensionExample() {
     const address = await signer.getAddress();
     console.log('Extension wallet address:', address);
     
-    // Send transaction
+    // Send transaction (ExtensionSigner requires to, value, and gasPrice;
+    // value is in wei — the extension does not auto-convert it)
     const tx = await signer.sendTransaction({
       to: '0x...',
-      value: '1000000000000000000' // 1 ETH
+      value: '1000000000000000000', // 1 NEC (in wei)
+      gasPrice: await provider.getGasPrice()
     });
   }
 }
@@ -375,47 +392,54 @@ async function extensionExample() {
 ### 5. Real-time Subscriptions
 
 ```javascript
-import { Provider, Subscription } from 'necjs';
+import { Subscription } from 'necjs';
 
 async function subscriptionExample() {
-  const provider = new Provider('wss://rpc.ncog.earth');
+  // Subscription takes a WebSocket URL and must be connected before subscribing.
+  const subscription = new Subscription('wss://rpc.ncog.earth');
+  await subscription.connect();
   
-  // Subscribe to new blocks
-  const subscription = new Subscription(provider);
-  const blockSub = await subscription.subscribe('newHeads', (block) => {
+  // subscribe(subType, params[], handler) -> resolves to a subscription id.
+  // Subscribe to new blocks (no extra params).
+  const blockSub = await subscription.subscribe('newHeads', [], (block) => {
     console.log('New block:', block);
   });
   
-  // Subscribe to contract events
-  const eventSub = await subscription.subscribe('logs', {
+  // Subscribe to contract events (the log filter is the first param).
+  const eventSub = await subscription.subscribe('logs', [{
     address: '0x...',
     topics: ['0x...']
-  }, (log) => {
+  }], (log) => {
     console.log('Contract event:', log);
   });
+  
+  // Later: await subscription.unsubscribe(blockSub); subscription.disconnect();
 }
 ```
 
 ### 6. Post-Quantum Cryptography
 
 ```javascript
-import { loadWasm, MlKem } from 'necjs';
+import { loadWasm } from 'necjs';
 
 async function mlkemExample() {
-  await loadWasm();
+  // loadWasm() resolves to an MlKem INSTANCE (ML-KEM-1024, key-exchange + AEAD only).
+  const mlkem = await loadWasm();
   
-  // Generate key pair
-  const keyPair = await MlKem.keygen();
+  // Generate a keypair -> { pubKey, privKey }
+  const { pubKey, privKey } = await mlkem.keyGen();
   
-  // Encrypt message
-  const ciphertext = await MlKem.encaps(keyPair.publicKey);
+  // Asymmetric encrypt -> { encryptedData, version }
+  const { encryptedData, version } = await mlkem.encrypt(pubKey, 'hello, post-quantum world');
   
-  // Decrypt message
-  const plaintext = await MlKem.decaps(ciphertext, keyPair.secretKey);
+  // Asymmetric decrypt -> original plaintext string
+  const plaintext = await mlkem.decrypt(privKey, encryptedData, version);
   
   console.log('Decrypted message:', plaintext);
 }
 ```
+
+> **ML-KEM is KEM-only** (key exchange + symmetric AEAD via `symEncrypt`/`symDecrypt`). Transaction **signing** is a separate scheme (ML-DSA-87) — use `signTransactionMLDSA87` from the tx-signer module, or the higher-level `Wallet`/`Signer` flow.
 
 ### 7. React Integration
 
@@ -457,31 +481,32 @@ function WalletComponent() {
 ### Core Classes
 
 #### Provider
-- **Constructor**: `new Provider(url, options?)`
-- **Methods**: `getBalance()`, `getBlockNumber()`, `sendTransaction()`, etc.
-- **Events**: WebSocket connection events
+- **Constructor**: `new Provider(url)`
+- **Methods**: `getBalance()`, `getBlockNumber()`, `sendRawTransaction()`, `getBlockByNumber()`, `getTransactionReceipt()`, `getLogs()`, `newFilter()`, `getFilterChanges()`, `watchLogs()`, etc.
+- **Typed getters**: `Block`, `TransactionResponse`, `TransactionReceipt`, `Log` result shapes
 
-#### Wallet
-- **Static Methods**: `create(privateKey)`, `fromMnemonic(mnemonic)`
-- **Instance Methods**: `signTransaction(tx)`, `getAddress()`
-- **Properties**: `address`, `privateKey`
+#### Wallet & Signer
+- **Wallet static methods**: `create(privateKey)` → `Wallet`, `connect(privateKey, providerUrl?)` → `{ signer, provider, address }`
+- **Wallet instance**: `connect(provider)` → `Signer`; properties `address`, `privateKey`
+- **Signer methods**: `sendTransaction(txParams)` → tx hash, `decode(rawSigned)`, `getAddress()`
 
 #### Contract
-- **Constructor**: `new Contract(address, abi, provider)`
-- **Methods**: Dynamic methods based on ABI
+- **Constructor**: `new Contract(address, abi, provider, signer?)`
+- **Methods**: Dynamic methods based on ABI (`contract.methods.foo(...args).call()/.send(opts)`)
+- **Static**: `Contract.deploy({ abi, bytecode, provider, deployer, constructorArgs?, options? })`
 - **Events**: `events.EventName()`
 
 #### ContractFactory
-- **Constructor**: `new ContractFactory(abi, bytecode, signer)`
-- **Methods**: `deploy(...args)`, `attach(address)`
+- **Constructor**: `new ContractFactory(abi, bytecode, provider, signer?)`
+- **Methods**: `deploy(constructorArgs?, options?)` → `Contract`, `attach(address)` → `Contract`
 
 #### ExtensionSigner
-- **Constructor**: `new ExtensionSigner(extension, provider)`
-- **Methods**: `getAddress()`, `sendTransaction(tx)`, `signMessage(message)`
+- **Constructor**: `new ExtensionSigner(injectedProvider, provider)`
+- **Methods**: `getAddress()`, `sendTransaction(tx)`, `on(event, listener)`
 
 #### Subscription
-- **Constructor**: `new Subscription(provider)`
-- **Methods**: `subscribe(type, params?, callback)`, `unsubscribe(id)`
+- **Constructor**: `new Subscription(wsUrl)`
+- **Methods**: `connect()`, `subscribe(type, params, callback)`, `unsubscribe(id)`, `on(event, handler)`, `off(event, handler)`, `disconnect()`
 
 ### Utility Functions
 
@@ -495,12 +520,14 @@ function WalletComponent() {
 
 ### MLKEM Functions
 
-- `loadWasm()`: Initialize WebAssembly
-- `MlKem.keygen()`: Generate key pair
-- `MlKem.encaps(publicKey)`: Encrypt message
-- `MlKem.decaps(ciphertext, secretKey)`: Decrypt message
-- `MlKem.sign(message, secretKey)`: Sign message
-- `MlKem.verify(message, signature, publicKey)`: Verify signature
+- `loadWasm()`: Load the ML-KEM WebAssembly module; resolves to an `MlKem` instance (`m`).
+- `m.keyGen()`: Generate an ML-KEM-1024 keypair `{ pubKey, privKey }`.
+- `m.encrypt(pubKey, message)`: Asymmetric encrypt → `{ encryptedData, version }`.
+- `m.decrypt(privKey, encryptedData, version)`: Asymmetric decrypt → plaintext string.
+- `m.symEncrypt(ssKey, message)`: Symmetric (shared-secret) encrypt → `{ encryptedData, version }`.
+- `m.symDecrypt(ssKey, encryptedData, version)`: Symmetric decrypt → plaintext string.
+
+> ML-KEM is **KEM-only**. There are no `sign`/`verify` methods. For transaction signing use the tx-signer module: `signTransactionMLDSA87(txParams, privateKeyHex, options?)`, `privateKeyToAddress`, `publicKeyToAddress`, `decodeRLPTransaction`.
 
 ---
 

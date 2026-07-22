@@ -1,5 +1,18 @@
 # Wallet Function Reference
 
+The `Wallet` and `Signer` classes provide local, WASM-free ML-DSA-87 transaction
+signing. A `Wallet` holds a private key + its derived address; connecting it to a
+`Provider` yields a `Signer` that fills in the missing transaction fields and
+broadcasts the signed transaction.
+
+> Currency note: values are denominated in **NEC** (18 decimals), never ETH.
+>
+> Signing note: transactions are signed with **ML-DSA-87** (post-quantum). ML-KEM
+> (`loadWasm` / `MlKem`) is a **separate, KEM-only** encryption module and has
+> nothing to do with `Wallet` or transaction signing — see
+> [MLKEM_FUNCTION_REFERENCE.md](MLKEM_FUNCTION_REFERENCE.md) and
+> [TX_SIGNER_FUNCTION_REFERENCE.md](TX_SIGNER_FUNCTION_REFERENCE.md).
+
 ## Interfaces
 
 ### TxParams Interface
@@ -26,43 +39,25 @@ interface TxParams {
 - `nonce` (any): Transaction nonce for ordering
 - `gasPrice` (string): Gas price in wei
 - `gasLimit` (string, optional): Maximum gas limit for the transaction
-- `gas` (string, optional): Gas amount for the transaction
+- `gas` (string, optional): Gas amount for the transaction (alias of `gasLimit`)
 - `to` (string): Recipient address
-- `value` (string): Transaction value
+- `value` (string): Transaction value in **NEC** (the `Signer` converts it to wei; see `sendTransaction`)
 - `data` (string, optional): Transaction data payload
-- `chainId` (number, optional): Blockchain network ID
-
-### MlKem Interface
-
-**Structure:**
-```typescript
-interface MlKem {
-  keyGen(): Promise<{ pubKey: string; privKey: string }>;
-  encrypt(pubKey: string, message: string): Promise<{ encryptedData: string; version: string }>;
-  decrypt(privKey: string, encryptedData: string, version: string): Promise<string>;
-  symEncrypt(ssKey: string, message: string): Promise<{ encryptedData: string; version: string }>;
-  symDecrypt(ssKey: string, encryptedData: string, version: string): Promise<string>;
-  privateKeyToAddress(privateKey: string): string;
-  signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
-  decodeRLPTransaction: (txHex: string) => any;
-}
-```
-
-**Description:** Defines the interface for ML-KEM cryptographic operations and transaction signing.
+- `chainId` (number, optional): Blockchain network ID (auto-filled by the `Signer` when omitted)
 
 ## Wallet Class
 
 ### Constructor
 
-**Function:** `private constructor(mlkem: MlKem, privateKey: string)`
+**Function:** `private constructor(privateKey: string, address: string)`
 
-**Description:** Private constructor for creating a Wallet instance.
+**Description:** The constructor is **private** — you cannot call `new Wallet(...)`.
+Create a wallet asynchronously with the static factory `Wallet.create(...)` (which
+derives the address from the private key) or the unified `Wallet.connect(...)`.
 
 **Input Parameters:**
-- `mlkem` (MlKem): ML-KEM cryptographic interface instance
-- `privateKey` (string): Private key in hexadecimal format
-
-**Response:** Creates a new Wallet instance with the provided ML-KEM interface and private key.
+- `privateKey` (string): ML-DSA-87 private key in hexadecimal format
+- `address` (string): The derived account address (supplied internally by `create`)
 
 ### Static Methods
 
@@ -70,7 +65,8 @@ interface MlKem {
 
 **Function:** `static async create(hexPrivateKey: string): Promise<Wallet>`
 
-**Description:** Creates a new Wallet instance with the provided private key.
+**Description:** Creates a new Wallet instance, deriving the address from the private key
+(`address = keccak256(rawMLDSApubkeyBytes)[12:]`).
 
 **Input Parameters:**
 - `hexPrivateKey` (string): Private key in hexadecimal format
@@ -80,6 +76,7 @@ interface MlKem {
 **Example:**
 ```typescript
 const wallet = await Wallet.create('0x1234567890abcdef...');
+console.log(wallet.address);
 ```
 
 #### connect (Static)
@@ -90,13 +87,16 @@ const wallet = await Wallet.create('0x1234567890abcdef...');
 
 **Input Parameters:**
 - `hexPrivateKey` (string): Private key in hexadecimal format
-- `providerUrl` (string, optional): RPC URL (defaults to 'http://localhost:8545')
+- `providerUrl` (string, optional): RPC URL (defaults to `'http://localhost:8545'`)
 
 **Response:** Promise<{ signer: Signer, provider: Provider, address: string }> - Object containing signer, provider, and wallet address
 
 **Example:**
 ```typescript
-const { signer, provider, address } = await Wallet.connect('0x1234567890abcdef...', 'https://rpc.example.com');
+const { signer, provider, address } = await Wallet.connect(
+  '0x1234567890abcdef...',
+  'https://rpc.ncog.earth'
+);
 ```
 
 ### Instance Methods
@@ -119,17 +119,17 @@ const signer = wallet.connect(provider);
 
 ### Properties
 
-- `mlkem` (MlKem): ML-KEM cryptographic interface instance
-- `privateKey` (string): Wallet's private key
-- `address` (string, readonly): Wallet's public address derived from the private key
+- `privateKey` (string): Wallet's ML-DSA-87 private key
+- `address` (string, readonly): Wallet's account address derived from the private key
 
 ## Signer Class
 
 ### Constructor
 
-**Function:** `constructor(private provider: Provider, private wallet: Wallet)`
+**Function:** `constructor(provider: Provider, wallet: Wallet)`
 
 **Description:** Creates a new Signer instance for transaction signing and sending.
+Usually obtained via `wallet.connect(provider)` rather than constructed directly.
 
 **Input Parameters:**
 - `provider` (Provider): Provider instance for blockchain interaction
@@ -145,9 +145,7 @@ const signer = wallet.connect(provider);
 
 **Description:** Getter for the wallet's address.
 
-**Input Parameters:** None
-
-**Response:** string - The wallet's public address
+**Response:** string - The wallet's account address
 
 ### Methods
 
@@ -157,9 +155,7 @@ const signer = wallet.connect(provider);
 
 **Description:** Asynchronously retrieves the wallet's address.
 
-**Input Parameters:** None
-
-**Response:** Promise<string> - The wallet's public address
+**Response:** Promise<string> - The wallet's account address
 
 **Example:**
 ```typescript
@@ -170,7 +166,19 @@ const address = await signer.getAddress();
 
 **Function:** `async sendTransaction(txParams: TxParams): Promise<string>`
 
-**Description:** Signs and sends a transaction to the blockchain.
+**Description:** Signs a transaction with ML-DSA-87 and broadcasts it via
+`eth_sendRawTransaction`.
+
+**Auto-filled fields** — the `Signer` fills these in for you when they are missing/falsy:
+- `chainId` ← `provider.getChainId()` (`eth_chainId`)
+- `nonce` ← `provider.getTransactionCount(from)`
+- `gasPrice` ← `provider.getGasPrice()`
+
+**Value conversion:** when `value` is set (and not `'0x'`), it is converted from NEC to
+wei-hex via `etherToWeiHex(value)`. Pass a NEC amount (e.g. `'1'` for 1 NEC).
+
+**Not auto-filled:** you must supply `gas` **or** `gasLimit` — `sendTransaction` throws
+`Missing required transaction parameters: gasLimit, gasPrice, nonce` otherwise.
 
 **Input Parameters:**
 - `txParams` (TxParams): Transaction parameters object
@@ -178,19 +186,20 @@ const address = await signer.getAddress();
 **Response:** Promise<string> - Transaction hash
 
 **Error Handling:**
-- Throws error if required transaction parameters are missing
-- Throws error if transaction signing fails
-- Throws error if RPC call fails
+- Throws if neither `gas` nor `gasLimit` is provided
+- Throws if signing fails
+- Throws if the `eth_sendRawTransaction` RPC call returns an error
 
 **Example:**
 ```typescript
 const txHash = await signer.sendTransaction({
-  from: '0x1234...',
-  to: '0x5678...',
-  value: 1,
-  gasPrice: '100000900',
+  from: wallet.address,
+  to: '0x5678901234567890abcdef0123456789abcdef01',
+  value: '1',            // 1 NEC — converted to wei-hex by the Signer
   gasLimit: '21000',
-  nonce: 0
+  gasPrice: '100000900', // optional — auto-filled from eth_gasPrice if omitted
+  nonce: 0,              // optional — auto-filled from eth_getTransactionCount if omitted
+  chainId: 2479          // optional — auto-filled from eth_chainId if omitted
 });
 ```
 
@@ -198,129 +207,32 @@ const txHash = await signer.sendTransaction({
 
 **Function:** `async decode(rawSigned: string): Promise<any>`
 
-**Description:** Decodes a raw signed transaction.
+**Description:** Decodes a raw signed transaction back into its fields (via
+`decodeRLPTransaction`). See
+[TX_SIGNER_FUNCTION_REFERENCE.md](TX_SIGNER_FUNCTION_REFERENCE.md) for the field layout.
 
 **Input Parameters:**
 - `rawSigned` (string): Raw signed transaction in hexadecimal format
 
 **Response:** Promise<any> - Decoded transaction object
 
-**Error Handling:**
-- Throws error if transaction decoding fails
-
 **Example:**
 ```typescript
-const decodedTx = await signer.decode('0xf86c8085174876e800830186a094095e7baea6a6c7c4c2dfeb977efac326af552d8780de0b6b3a7640000801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a36649353a0efffd310ac743f371de3b9f7f9cb56c0b28ad43601b4ab949f53faa07bd2c804');
+const decodedTx = await signer.decode('0x...');
 ```
-
-## MlKem Interface Methods
-
-### keyGen
-
-**Function:** `keyGen(): Promise<{ pubKey: string; privKey: string }>`
-
-**Description:** Generates a new public/private key pair using ML-KEM.
-
-**Input Parameters:** None
-
-**Response:** Promise<{ pubKey: string; privKey: string }> - Generated key pair
-
-### encrypt
-
-**Function:** `encrypt(pubKey: string, message: string): Promise<{ encryptedData: string; version: string }>`
-
-**Description:** Encrypts a message using the provided public key.
-
-**Input Parameters:**
-- `pubKey` (string): Public key for encryption
-- `message` (string): Message to encrypt
-
-**Response:** Promise<{ encryptedData: string; version: string }> - Encrypted data and version
-
-### decrypt
-
-**Function:** `decrypt(privKey: string, encryptedData: string, version: string): Promise<string>`
-
-**Description:** Decrypts encrypted data using the provided private key.
-
-**Input Parameters:**
-- `privKey` (string): Private key for decryption
-- `encryptedData` (string): Encrypted data to decrypt
-- `version` (string): Version of the encryption
-
-**Response:** Promise<string> - Decrypted message
-
-### symEncrypt
-
-**Function:** `symEncrypt(ssKey: string, message: string): Promise<{ encryptedData: string; version: string }>`
-
-**Description:** Performs symmetric encryption using a shared secret key.
-
-**Input Parameters:**
-- `ssKey` (string): Shared secret key
-- `message` (string): Message to encrypt
-
-**Response:** Promise<{ encryptedData: string; version: string }> - Encrypted data and version
-
-### symDecrypt
-
-**Function:** `symDecrypt(ssKey: string, encryptedData: string, version: string): Promise<string>`
-
-**Description:** Performs symmetric decryption using a shared secret key.
-
-**Input Parameters:**
-- `ssKey` (string): Shared secret key
-- `encryptedData` (string): Encrypted data to decrypt
-- `version` (string): Version of the encryption
-
-**Response:** Promise<string> - Decrypted message
-
-### privateKeyToAddress
-
-**Function:** `privateKeyToAddress(privateKey: string): string`
-
-**Description:** Derives a public address from a private key.
-
-**Input Parameters:**
-- `privateKey` (string): Private key in hexadecimal format
-
-**Response:** string - Derived public address
-
-### signTransactionMLDSA87
-
-**Function:** `signTransactionMLDSA87(TxObject: any, privateKeyHex: string): any`
-
-**Description:** Signs a transaction using ML-DSA-87 algorithm.
-
-**Input Parameters:**
-- `TxObject` (any): Transaction object to sign
-- `privateKeyHex` (string): Private key in hexadecimal format
-
-**Response:** any - Signed transaction object
-
-### decodeRLPTransaction
-
-**Function:** `decodeRLPTransaction(txHex: string): any`
-
-**Description:** Decodes an RLP-encoded transaction.
-
-**Input Parameters:**
-- `txHex` (string): RLP-encoded transaction in hexadecimal format
-
-**Response:** any - Decoded transaction object
 
 ## Usage Examples
 
 ### Basic Wallet Creation and Connection
 
 ```typescript
-import { Wallet } from 'necjs';
+import { Provider, Wallet } from 'necjs';
 
-// Create wallet from private key
+// Create wallet from private key (address derived automatically)
 const wallet = await Wallet.create('0x1234567890abcdef...');
 
-// Connect to provider
-const provider = new Provider('https://rpc.example.com');
+// Connect to a provider to get a Signer
+const provider = new Provider('https://rpc.ncog.earth');
 const signer = wallet.connect(provider);
 
 // Get wallet address
@@ -330,14 +242,14 @@ const address = await signer.getAddress();
 ### Sending a Transaction
 
 ```typescript
-// Send transaction
+// chainId, nonce and gasPrice are auto-filled when omitted; value is a NEC amount.
 const txHash = await signer.sendTransaction({
   from: wallet.address,
-  to: '0x5678901234567890abcdef...',
-  value: 1,
-  gasPrice: '100000900',
+  to: '0x0987654321098765432109876543210987654321',
+  value: '1',
   gasLimit: '21000',
-  nonce: 0
+  gasPrice: '100000900',
+  nonce: 0,
   chainId: 2479
 });
 ```
@@ -348,6 +260,6 @@ const txHash = await signer.sendTransaction({
 // Create wallet, provider, and signer in one call
 const { signer, provider, address } = await Wallet.connect(
   '0x1234567890abcdef...',
-  'https://rpc.example.com'
+  'https://rpc.ncog.earth'
 );
-``` 
+```

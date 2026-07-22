@@ -50,12 +50,10 @@ export interface MlKem {
     version: string
   ): Promise<string>;
 
-  /**
-   * Derive an EVM-style address (hex) from a raw private-key string.
-   */
-  privateKeyToAddress(privateKey: string): string;
-  signTransactionMLDSA87: (TxObject: any, privateKeyHex: string) => any;
-  decodeRLPTransaction: (txHex: string) => any;
+  // NOTE: This is a KEM-ONLY interface (ML-KEM-1024 key-exchange + AEAD). Transaction SIGNING is NOT here
+  // — it is a different scheme (ML-DSA-87). Sign/decode via the free functions in tx-signer.ts
+  // (signTransactionMLDSA87 / decodeRLPTransaction / privateKeyToAddress / publicKeyToAddress), which are
+  // byte-verified against the node. The old signer methods were removed from this interface in v2.
 }
 
 // Environment detection

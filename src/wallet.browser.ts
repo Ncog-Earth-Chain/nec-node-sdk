@@ -1,5 +1,5 @@
 // src/wallet.browser.ts
-import { loadWasm, type MlKemBrowser } from './webassembly/mlkem-browser';
+import { signTransactionMLDSA87, privateKeyToAddress, decodeRLPTransaction } from './tx-signer';
 import type { Provider } from './provider';
 import { normalizeResponse, etherToWeiHex } from './utils.js';
 
@@ -16,19 +16,17 @@ export interface TxParams {
 }
 
 export class Wallet {
-  public mlkem: MlKemBrowser;
   public privateKey: string;
   public readonly address: string;
 
-  private constructor(mlkem: MlKemBrowser, privateKey: string) {
-    this.mlkem = mlkem;
+  private constructor(privateKey: string, address: string) {
     this.privateKey = privateKey;
-    this.address = this.mlkem.privateKeyToAddress(privateKey);
+    this.address = address;
   }
 
   static async create(hexPrivateKey: string): Promise<Wallet> {
-    const mlkem = await loadWasm();
-    return new Wallet(mlkem, hexPrivateKey);
+    const address = await privateKeyToAddress(hexPrivateKey);
+    return new Wallet(hexPrivateKey, address);
   }
 
   connect(provider: Provider): Signer {
@@ -78,7 +76,7 @@ export class Signer {
       txParams.value = etherToWeiHex(txParams.value)
     }
 
-    const rawSignedObj = this.wallet.mlkem.signTransactionMLDSA87(txParams, this.wallet.privateKey);
+    const rawSignedObj = await signTransactionMLDSA87(txParams, this.wallet.privateKey);
     if (!rawSignedObj || (!rawSignedObj.raw && !rawSignedObj.rawTransaction)) {
       throw new Error('signTransactionMLDSA87 failed: ' + JSON.stringify(rawSignedObj));
     }
@@ -90,7 +88,10 @@ export class Signer {
         JSON.stringify(sendResponse.error)
       );
     }
-    await new Promise(resolve => setTimeout(resolve, 1000));
     return normalizeResponse(sendResponse.result || sendResponse ) as string; // returns tx hash
+  }
+
+  async decode(rawSigned: string): Promise<any> {
+    return decodeRLPTransaction(rawSigned);
   }
 } 

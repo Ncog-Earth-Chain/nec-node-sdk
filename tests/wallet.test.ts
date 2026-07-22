@@ -14,6 +14,16 @@ jest.mock('../src/webassembly/mlkem', () => {
   };
 });
 
+// Wallet/Signer were refactored to sign via the WASM-free native signer in ./tx-signer (privateKeyToAddress,
+// signTransactionMLDSA87, decodeRLPTransaction) instead of the WASM mlkem module. Mock that module so the
+// real ML-DSA derivation isn't run against the dummy test key. The mock reuses the same jest.fn()s as
+// mockMlKem, so the existing assertions (mockMlKem.signTransactionMLDSA87 / decodeRLPTransaction) still hold.
+jest.mock('../src/tx-signer', () => ({
+  privateKeyToAddress: mockMlKem.privateKeyToAddress,
+  signTransactionMLDSA87: mockMlKem.signTransactionMLDSA87,
+  decodeRLPTransaction: mockMlKem.decodeRLPTransaction,
+}));
+
 
 // 👇 Now your imports
 import { Wallet, Signer, TxParams } from '../src/wallet';

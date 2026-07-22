@@ -261,5 +261,30 @@ import { isValidAddress, hexToDecimalString, etherToWeiHex } from 'necjs';
 
 console.log(isValidAddress('0x123...')); // true/false
 console.log(hexToDecimalString('0x1a')); // '26'
-console.log(etherToWeiHex(1)); // '0x...' (Wei value for 1 Ether)
-``` 
+console.log(etherToWeiHex(1)); // '0x...' (Wei value for 1 NEC)
+```
+
+---
+
+## DDB (Decentralized Database) Example
+
+Reads from the on-chain DDB need no signing and are safe from a frontend. `Ddb.select` /
+`Ddb.query` query the node's Postgres directly. Use `Ddb.deriveDbName(contractName, contractAddress)`
+to get the schema (db_name) for any schema-scoped call.
+
+```js
+import { Provider, Ddb } from 'necjs';
+
+(async () => {
+  const provider = new Provider('https://rpc.ncog.earth');
+  const ddb = new Ddb(provider);
+
+  const dbName = Ddb.deriveDbName('users', contractAddress); // e.g. 'users_abcdef'
+  const rows = await ddb.select(dbName, 'accounts', { limit: 50 });
+  console.log('rows:', rows);
+})();
+```
+
+> Writes (`createSchemaSigned` / `callProcedureSigned` / `grantRoleSigned` / `revokeRoleSigned`)
+> are client-signed with an ML-DSA-87 private key and are best kept on a backend (see the Node.js /
+> NestJS integration guides). 

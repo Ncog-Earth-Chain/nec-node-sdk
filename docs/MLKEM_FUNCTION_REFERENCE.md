@@ -347,17 +347,23 @@ console.log('Derived address:', address);
 
 ### Transaction Signing
 
+> Note: the Go-WASM `mlkem.signTransactionMLDSA87` signing path is deprecated — it emits the rejected legacy 8-field / hex-ASCII-pubkey format. Use the native exported signer below, which folds `chainId` into the ML-DSA-87 SigningHash for replay protection.
+
 ```typescript
-// Sign a transaction with ML-DSA-87
+import { signTransactionMLDSA87 } from 'necjs';
+
+// Sign a transaction with ML-DSA-87 (native signer)
 const txObject = {
   to: '0x1234567890123456789012345678901234567890',
   value: '0x1000000000000000000',
   gasPrice: '0x09184e72a000',
-  nonce: 0
+  gas: '0x5208',
+  nonce: 0,
+  chainId: 2479 // 0x9af NCOG testnet — signed into the SigningHash for replay protection
 };
 
 const privateKeyHex = '0x1234567890123456789012345678901234567890123456789012345678901234';
-const signedTx = mlkem.signTransactionMLDSA87(txObject, privateKeyHex);
+const signedTx = await signTransactionMLDSA87(txObject, privateKeyHex);
 console.log('Signed transaction:', signedTx);
 ```
 

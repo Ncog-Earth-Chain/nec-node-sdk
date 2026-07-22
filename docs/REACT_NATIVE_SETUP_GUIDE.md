@@ -729,11 +729,14 @@ const symDecrypted = await WalletModule.symDecryptMobile(sharedSecret, symEncryp
 
 ```typescript
 // Sign transaction
+// chainId is REQUIRED — it is folded into the ML-DSA-87 SigningHash for replay
+// protection, so a tx without it (or with chainId 1) is rejected by the node.
 const txObject = {
   to: '0x1234567890123456789012345678901234567890',
   value: '0x1000000000000000000',
   gasPrice: '0x09184e72a000',
-  nonce: 0
+  nonce: 0,
+  chainId: 2479 // NCOG testnet (0x9af)
 };
 
 const signedTx = await WalletModule.signTransactionMobile(txObject, keyPair.privKey);
@@ -774,6 +777,7 @@ export const signTransaction = async (
     gas: string;
     gasPrice: string;
     nonce: string;
+    chainId: number; // REQUIRED — folded into the ML-DSA-87 SigningHash (NCOG testnet = 2479 / 0x9af)
   },
   mldsa87PrivateKey: string
 ): Promise<{
@@ -818,6 +822,9 @@ export class ReactNativeWallet {
       const gasPrice = await this.provider.getGasPrice();
       const nonce = await this.provider.getTransactionCount(sender);
       const gasLimit = '21000'; // Standard transfer
+      // chainId is REQUIRED and folded into the ML-DSA-87 SigningHash for replay
+      // protection — fetch it from the node (NCOG testnet returns 2479 / 0x9af).
+      const chainId = await this.provider.getChainId();
       
       // Create transaction
       const txArgs = {
@@ -825,7 +832,8 @@ export class ReactNativeWallet {
         value: amount,
         gas: gasLimit,
         gasPrice: gasPrice.toString(),
-        nonce: nonce.toString()
+        nonce: nonce.toString(),
+        chainId
       };
       
       // Sign transaction

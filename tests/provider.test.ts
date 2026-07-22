@@ -94,7 +94,6 @@ describe('Provider', () => {
     await expect(provider.netVersion()).resolves.toBe(1);
     await expect(provider.listening()).resolves.toBe(1);
     await expect(provider.peerCount()).resolves.toBe(1);
-    await expect(provider.protocolVersion()).resolves.toBe(1);
     await expect(provider.syncing()).resolves.toBe(1);
     await expect(provider.coinbase()).resolves.toBe(1);
     await expect(provider.hashrate()).resolves.toBe(1);
@@ -118,12 +117,15 @@ describe('Provider', () => {
     await expect(provider.getTransactionByHash('0xhash')).resolves.toBe(1);
     await expect(provider.getTransactionReceipt('0xhash')).resolves.toBe(1);
     await expect(provider.getLogs({})).resolves.toBe(1);
-    await expect(provider.submitWork('0x1', '0x2', '0x3')).resolves.toBe(1);
-    await expect(provider.getWork()).resolves.toBe(1);
+    // PoW mining methods (getWork/submitWork) were removed on NCOG (aBFT/PoS); protocolVersion throws.
+    await expect(provider.protocolVersion()).rejects.toThrow('not supported');
     await expect(provider.newAccount('pw')).resolves.toBe(1);
     await expect(provider.importRawKey('key', 'pw')).resolves.toBe(1);
     await expect(provider.personalSign('data', '0xabc', 'pw')).resolves.toBe(1);
-    await expect(provider.ecRecover('data', 'sig')).resolves.toBe(1);
+    // ecRecover is removed on the upgraded chain (ML-DSA-87 has no key recovery) — it now throws.
+    await expect(provider.ecRecover('data', 'sig')).rejects.toThrow('ecRecover is not supported');
+    // verifyMessage (personal_verifyMessage) is its replacement; requires the signer's public key.
+    await expect(provider.verifyMessage('data', 'sig', 'pubkey')).resolves.toBe(1);
     await expect(provider.unlockAccount('0xabc', 'pw')).resolves.toBe(1);
     await expect(provider.lockAccount('0xabc')).resolves.toBe(1);
     await expect(provider.sendPersonalTransaction({}, 'pw')).resolves.toBe(1);
@@ -181,13 +183,13 @@ describe('Provider', () => {
       provider.call = jest.fn()
         .mockResolvedValueOnce('0xresolver')
         .mockResolvedValueOnce('0xaddress');
-      const result = await provider.resolveEnsName('foo.eth');
+      const result = await provider.resolveEnsName('foo.eth', '0x00000000000000000000000000000000000dEaD1');
       expect(result).toBe('0xaddress');
     });
     it('returns null if resolver not found', async () => {
       jest.mock('ethers', () => ({ utils: { namehash: jest.fn().mockReturnValue('0xnode') } }));
       provider.call = jest.fn().mockResolvedValueOnce('0x');
-      const result = await provider.resolveEnsName('foo.eth');
+      const result = await provider.resolveEnsName('foo.eth', '0x00000000000000000000000000000000000dEaD1');
       expect(result).toBeNull();
     });
     it('returns null if address not found', async () => {
@@ -195,12 +197,12 @@ describe('Provider', () => {
       provider.call = jest.fn()
         .mockResolvedValueOnce('0xresolver')
         .mockResolvedValueOnce('0x');
-      const result = await provider.resolveEnsName('foo.eth');
+      const result = await provider.resolveEnsName('foo.eth', '0x00000000000000000000000000000000000dEaD1');
       expect(result).toBeNull();
     });
     it('returns null on error', async () => {
       provider.call = jest.fn().mockRejectedValue(new Error('fail'));
-      const result = await provider.resolveEnsName('foo.eth');
+      const result = await provider.resolveEnsName('foo.eth', '0x00000000000000000000000000000000000dEaD1');
       expect(result).toBeNull();
     });
   });

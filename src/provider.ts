@@ -1,5 +1,25 @@
 import axios, { AxiosError } from 'axios';
+import { keccak_256 } from '@noble/hashes/sha3';
 import { normalizeResponse, serializeForRpc, weiToNec } from './utils';
+
+// ENS namehash (EIP-137), computed locally with @noble/hashes (a real dependency) — no ethers needed.
+// node = keccak256(node ‖ keccak256(label)) folded right-to-left over the dot-separated labels, from 32 zero bytes.
+function ensNamehash(name: string): string {
+  let node: Uint8Array = new Uint8Array(32);
+  if (name) {
+    const labels = name.split('.');
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const labelHash = keccak_256(new TextEncoder().encode(labels[i]));
+      const combined = new Uint8Array(64);
+      combined.set(node, 0);
+      combined.set(labelHash, 32);
+      node = keccak_256(combined);
+    }
+  }
+  let hex = '';
+  for (let i = 0; i < node.length; i++) hex += node[i].toString(16).padStart(2, '0');
+  return '0x' + hex;
+}
 
 /**
  * Represents a structured error returned from a JSON-RPC call.
@@ -18,6 +38,83 @@ export class RpcError extends Error {
 
 export type ProviderRequestMiddleware = (payload: any) => Promise<any> | any;
 export type ProviderResponseMiddleware = (response: any, payload: any) => Promise<any> | any;
+
+// ---------------------------------------------------------------------------
+// Typed shapes of the common eth_* getter responses (hex-quantity strings, as the node returns them).
+// All carry an index signature so forward-compatible node fields are preserved without a type break.
+// ---------------------------------------------------------------------------
+
+/** An event log (eth_getLogs / eth_getFilterChanges / receipt.logs). */
+export interface Log {
+  address: string;
+  topics: string[];
+  data: string;
+  blockNumber: string;
+  transactionHash: string;
+  transactionIndex: string;
+  blockHash: string;
+  logIndex: string;
+  removed: boolean;
+  [k: string]: unknown;
+}
+
+/** A transaction as returned by eth_getTransactionByHash / block.transactions (full=true). */
+export interface TransactionResponse {
+  hash: string;
+  nonce: string;
+  blockHash: string | null;
+  blockNumber: string | null;
+  transactionIndex: string | null;
+  from: string;
+  to: string | null;
+  value: string;
+  gasPrice: string;
+  gas: string;
+  input: string;
+  [k: string]: unknown;
+}
+
+/** A transaction receipt (eth_getTransactionReceipt). `status` is "0x1" (success) or "0x0" (revert). */
+export interface TransactionReceipt {
+  transactionHash: string;
+  transactionIndex: string;
+  blockHash: string;
+  blockNumber: string;
+  from: string;
+  to: string | null;
+  cumulativeGasUsed: string;
+  gasUsed: string;
+  contractAddress: string | null;
+  logs: Log[];
+  logsBloom: string;
+  status: string;
+  [k: string]: unknown;
+}
+
+/** A block header + body (eth_getBlockByNumber / eth_getBlockByHash). */
+export interface Block {
+  number: string | null;
+  hash: string | null;
+  parentHash: string;
+  nonce: string;
+  timestamp: string;
+  miner: string;
+  gasLimit: string;
+  gasUsed: string;
+  /** tx hashes when full=false, full TransactionResponse objects when full=true */
+  transactions: string[] | TransactionResponse[];
+  [k: string]: unknown;
+}
+
+/** A log filter for eth_getLogs / eth_newFilter. */
+export interface LogFilter {
+  fromBlock?: string;
+  toBlock?: string;
+  address?: string | string[];
+  /** topic matchers: a topic hash, an array (OR), or null (wildcard), positionally */
+  topics?: (string | string[] | null)[];
+  blockHash?: string;
+}
 
 /**
  * The Provider class is a low-level wrapper for making JSON-RPC requests to an NCOG chain node.
@@ -48,8 +145,9 @@ export class Provider {
    */
   constructor(url: string) {
     if (url.includes('http')) {
-        let leftPart = url.split('//')[1];
-      if (leftPart.startsWith('wsapi')) {
+      const leftPart = url.split('//')[1];
+      // guard: a malformed URL (no "//") leaves leftPart undefined — don't throw in the constructor.
+      if (leftPart && leftPart.startsWith('wsapi')) {
         url = url + '/api';
       }
     }
@@ -83,7 +181,10 @@ export class Provider {
       if (response?.error) {
         throw new RpcError(response?.error?.message, response?.error?.code, response?.error?.data);
       }
-      return normalizeResponse(response?.result || response);
+      // Use the `result` field when present — even when it is a legitimate falsy value (false from
+      // eth_syncing / net_listening, 0, "", null). `result || response` wrongly returned the whole envelope
+      // for those.
+      return normalizeResponse(response && 'result' in response ? response.result : response);
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(`RPC request failed for method "${method}": ${error.message}`);
@@ -123,7 +224,8 @@ export class Provider {
         if (res.error) {
           return { error: res.error };
         }
-        return normalizeResponse(res.result || res);
+        // Preserve legitimate falsy results (false/0/""/null) — see rpc() above.
+        return normalizeResponse(res && 'result' in res ? res.result : res);
       });
     } catch (error) {
       return calls.map(() => ({ error: (error as any).message || error }));
@@ -139,6 +241,15 @@ export class Provider {
     // Serialize all params for RPC
     const serializedParams = params.map(p => typeof p === 'object' && p !== null ? serializeForRpc(p) : p);
     return this.rpc(method, serializedParams);
+  }
+
+  /**
+   * Raw JSON-RPC call — sends `params` VERBATIM with no tx-oriented serialization. Use this for methods
+   * whose params are plain JSON values (strings, arrays, structured objects with numeric fields), e.g. the
+   * `ddb_*` namespace, where callRpc's serializeForRpc would mangle arrays and hex-encode numeric fields.
+   */
+  async send(method: string, params: any[] = []): Promise<any> {
+    return this.rpc(method, params);
   }
 
   // --- web3 ---
@@ -165,10 +276,12 @@ export class Provider {
 
   // --- eth ---
   /**
-   * Returns the current protocol version.
+   * @deprecated Not implemented by NCOG nodes (there is no legacy eth protocol-version concept). Throws.
    */
-  async protocolVersion(): Promise<string> { return this.rpc('eth_protocolVersion'); }
-  
+  async protocolVersion(): Promise<string> {
+    throw new Error('eth_protocolVersion is not supported on NCOG nodes');
+  }
+
   /**
    * Returns an object with data about the sync status or `false` if not syncing.
    */
@@ -260,7 +373,7 @@ export class Provider {
    * @param tag The block tag or number.
    * @param full If true, returns full transaction objects; otherwise, only transaction hashes.
    */
-  async getBlockByNumber(tag: string, full = false): Promise<any> {
+  async getBlockByNumber(tag: string, full = false): Promise<Block | null> {
     return this.rpc('eth_getBlockByNumber', [tag, full]);
   }
 
@@ -269,7 +382,7 @@ export class Provider {
    * @param hash The hash of the block.
    * @param full If true, returns full transaction objects; otherwise, only transaction hashes.
    */
-  async getBlockByHash(hash: string, full = false): Promise<any> {
+  async getBlockByHash(hash: string, full = false): Promise<Block | null> {
     return this.rpc('eth_getBlockByHash', [hash, full]);
   }
   
@@ -335,38 +448,88 @@ export class Provider {
    * Returns a transaction by its hash.
    * @param hash The hash of the transaction.
    */
-  async getTransactionByHash(hash: string): Promise<any> {
+  async getTransactionByHash(hash: string): Promise<TransactionResponse | null> {
     return this.rpc('eth_getTransactionByHash', [hash]);
   }
 
   /**
-   * Returns the receipt of a transaction by its hash.
+   * Returns the receipt of a transaction by its hash (null until the tx is mined).
    * @param hash The hash of the transaction.
    */
-  async getTransactionReceipt(hash: string): Promise<any> {
+  async getTransactionReceipt(hash: string): Promise<TransactionReceipt | null> {
     return this.rpc('eth_getTransactionReceipt', [hash]);
   }
 
   /**
-   * Returns an array of all logs matching a given filter object.
+   * Returns an array of all logs matching a given filter object (one-shot).
    * @param filter The filter object.
    */
-  async getLogs(filter: any): Promise<any[]> {
-    return this.rpc('eth_getLogs', [filter]);
+  async getLogs(filter: LogFilter): Promise<Log[]> {
+    return this.rpc('eth_getLogs', [serializeForRpc(filter)]);
   }
-  
-  // --- Mining ---
-  /**
-   * Used for submitting a proof-of-work solution.
-   */
-  async submitWork(nonce: string, powHash: string, mixDigest: string): Promise<any> {
-    return this.rpc('eth_submitWork', [nonce, powHash, mixDigest]);
+
+  // --- filters (HTTP poll-based event/log watching; WebSocket clients use Subscription) ---
+  /** Install a log filter; returns the filter id. Poll it with getFilterChanges / getFilterLogs. */
+  async newFilter(filter: LogFilter): Promise<string> {
+    return this.rpc('eth_newFilter', [serializeForRpc(filter)]);
+  }
+
+  /** Install a filter that reports new block hashes; returns the filter id. */
+  async newBlockFilter(): Promise<string> {
+    return this.rpc('eth_newBlockFilter');
+  }
+
+  /** Install a filter that reports new pending-transaction hashes; returns the filter id. */
+  async newPendingTransactionFilter(): Promise<string> {
+    return this.rpc('eth_newPendingTransactionFilter');
   }
 
   /**
-   * Used for obtaining a proof-of-work problem.
+   * Poll a filter for what changed since the last poll. For a log filter this returns Log[]; for a block /
+   * pending-tx filter it returns an array of 0x-hex hashes.
    */
-  async getWork(): Promise<any> { return this.rpc('eth_getWork'); }
+  async getFilterChanges(filterId: string): Promise<Log[] | string[]> {
+    return this.rpc('eth_getFilterChanges', [filterId]);
+  }
+
+  /** Return ALL logs matching a (log) filter id — the full set, not just the delta. */
+  async getFilterLogs(filterId: string): Promise<Log[]> {
+    return this.rpc('eth_getFilterLogs', [filterId]);
+  }
+
+  /** Tear down a filter. Returns true if it existed. */
+  async uninstallFilter(filterId: string): Promise<boolean> {
+    return this.rpc('eth_uninstallFilter', [filterId]);
+  }
+
+  /**
+   * Poll-based log watcher for HTTP transports (WebSocket clients should use Subscription instead). Installs
+   * an eth_newFilter, polls eth_getFilterChanges every `intervalMs` (default 4000), and invokes `onLogs` with
+   * each non-empty batch. Resolves to an async `stop()` that uninstalls the filter and halts polling.
+   */
+  async watchLogs(
+    filter: LogFilter,
+    onLogs: (logs: Log[]) => void,
+    opts: { intervalMs?: number; onError?: (e: unknown) => void } = {},
+  ): Promise<() => Promise<void>> {
+    const filterId = await this.newFilter(filter);
+    const interval = opts.intervalMs ?? 4000;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      if (stopped) return;
+      try {
+        const changes = await this.getFilterChanges(filterId);
+        if (Array.isArray(changes) && changes.length) onLogs(changes as Log[]);
+      } catch (e) {
+        if (opts.onError) opts.onError(e);
+      }
+    }, interval);
+    return async () => {
+      stopped = true;
+      clearInterval(timer);
+      try { await this.uninstallFilter(filterId); } catch { /* best-effort */ }
+    };
+  }
 
   // --- personal ---
   /**
@@ -398,12 +561,26 @@ export class Provider {
   }
 
   /**
-   * Recovers the address that signed a piece of data.
-   * @param data The original data.
-   * @param signature The signature.
+   * @deprecated ML-DSA-87 has NO key recovery — the upgraded node removed personal_ecRecover entirely.
+   * Use verifyMessage(data, signature, publicKey) instead, which requires the signer's public key.
    */
-  async ecRecover(data: string, signature: string): Promise<string> {
-    return this.rpc('personal_ecRecover', [data, signature]);
+  async ecRecover(_data: string, _signature: string): Promise<string> {
+    throw new Error(
+      'ecRecover is not supported: ML-DSA-87 has no key recovery. Use verifyMessage(data, signature, publicKey) (personal_verifyMessage) with the signer public key.'
+    );
+  }
+
+  /**
+   * Verifies an ML-DSA-87 personal-message signature and returns the signer's address.
+   * The public key MUST be supplied (there is no key recovery). Mirrors the node's
+   * personal_verifyMessage(data, sig, pubkey).
+   * @param data      The original message (utf-8 string or 0x-hex).
+   * @param signature 0x-hex ML-DSA-87 signature.
+   * @param publicKey 0x-hex raw ML-DSA-87 public key of the claimed signer.
+   * @returns the recovered/verified signer address, or throws if the signature does not verify.
+   */
+  async verifyMessage(data: string, signature: string, publicKey: string): Promise<string> {
+    return this.rpc('personal_verifyMessage', [data, signature, publicKey]);
   }
 
   /**
@@ -434,15 +611,17 @@ export class Provider {
   }
 
   /**
-   * Resolves an ENS name to an Ethereum address using the ENS registry contract.
-   * @param ensName The ENS name to resolve (e.g., 'vitalik.eth').
-   * @param registryAddress The ENS registry contract address (optional, defaults to mainnet address).
-   * @returns The resolved Ethereum address, or null if not found.
+   * Resolves an ENS-style name to an address via an ENS-compatible registry contract. NOTE: NCOG does not
+   * ship a canonical ENS registry — you MUST pass the `registryAddress` of a deployed ENS-compatible
+   * registry on your target chain. namehash is computed locally (no ethers dependency).
+   * @param ensName The name to resolve (e.g., 'alice.nec').
+   * @param registryAddress The ENS-compatible registry contract address (required on NCOG).
+   * @returns The resolved address, or null if not found.
    */
-  async resolveEnsName(ensName: string, registryAddress = '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e'): Promise<string | null> {
+  async resolveEnsName(ensName: string, registryAddress: string): Promise<string | null> {
     try {
-      const { namehash } = require('ethers');
-      const node = namehash(ensName);
+      if (!registryAddress) return null;
+      const node = ensNamehash(ensName);
       // ENS registry ABI: function resolver(bytes32 node) external view returns (address)
       const data = '0x0178b8bf' + node.replace(/^0x/, ''); // resolver(bytes32) selector + node
       const callObj = { to: registryAddress, data };

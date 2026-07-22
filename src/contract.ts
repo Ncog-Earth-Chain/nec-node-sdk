@@ -130,7 +130,6 @@ export class Contract {
   async call(method: string, params: any[] = [], options: Record<string, any> = {}): Promise<any> {
     const data = this.abiInterface.encodeFunctionData(method, params);
     const tx = { to: this.address, data, ...options };
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate delay
     const result = await this.provider.call(tx, 'latest');
 
     // Patch: If result is 0 (from hexToDecimalString), convert back to '0x' for decodeFunctionResult

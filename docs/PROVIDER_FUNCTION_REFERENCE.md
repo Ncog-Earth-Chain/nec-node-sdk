@@ -150,11 +150,22 @@ const results = await provider.batchRpc([
 ]);
 ```
 
+### callRpc vs send
+
+The Provider exposes **two** generic escape hatches. They differ only in how `params` are serialized:
+
+| Method | Param handling | Use for |
+| --- | --- | --- |
+| `callRpc(method, params)` | **tx-shaped serialization** — every object param is run through `serializeForRpc` (numeric fields → hex, `value` → wei-hex, etc.). | Transaction-style calls whose params are tx objects (e.g. `eth_sendRawTransaction`, custom eth methods). |
+| `send(method, params)` | **verbatim** — params are passed through untouched. | Methods whose params are plain JSON — the `ddb_*` namespace, arrays, and structured objects with numeric fields that must not be hex-encoded. |
+
 ### callRpc
 
 **Function:** `async callRpc(method: string, params: any[] = []): Promise<any>`
 
-**Description:** Provides a public way to make any RPC call, for methods not explicitly wrapped.
+**Description:** Public escape hatch for any RPC method. Each object param is serialized for a
+transaction-shaped payload via `serializeForRpc` (numeric fields become hex, `value` becomes
+wei-hex). Do **not** use it for `ddb_*` or other structured-JSON methods — use `send` instead.
 
 **Input Parameters:**
 - `method` (string): The RPC method name
@@ -164,7 +175,27 @@ const results = await provider.batchRpc([
 
 **Example:**
 ```typescript
-const result = await provider.callRpc('custom_method', ['param1', 'param2']);
+const result = await provider.callRpc('eth_sendRawTransaction', ['0x...']);
+```
+
+### send
+
+**Function:** `async send(method: string, params: any[] = []): Promise<any>`
+
+**Description:** Raw JSON-RPC call — sends `params` **verbatim** with no tx-oriented serialization.
+Required for methods whose params are plain JSON values (strings, arrays, structured objects with
+numeric fields), e.g. the `ddb_*` namespace, where `callRpc`'s serializer would mangle arrays and
+hex-encode numeric fields. (The `Ddb` client uses `send` internally.)
+
+**Input Parameters:**
+- `method` (string): The RPC method name
+- `params` (any[], optional): An array of parameters, passed through unchanged
+
+**Response:** Promise<any> - RPC response result
+
+**Example:**
+```typescript
+const schema = await provider.send('ddb_getSchema', ['users_abcdef']);
 ```
 
 ## Web3 Methods
@@ -236,6 +267,14 @@ console.log('Peer count:', peerCount);
 ```
 
 ## Eth Methods
+
+### protocolVersion (removed)
+
+**Function:** `async protocolVersion(): Promise<string>`
+
+**Description:** REMOVED — this method **throws**. NCOG nodes have no legacy eth protocol-version
+concept, so `provider.protocolVersion()` rejects with `eth_protocolVersion is not supported on NCOG
+nodes`. (There is also no `getWork` / `submitWork` — NCOG is not proof-of-work.)
 
 ### syncing
 
@@ -648,41 +687,108 @@ const logs = await provider.getLogs({
 console.log('Logs:', logs);
 ```
 
-## Mining Methods
+## Filter Methods
 
-### submitWork
+HTTP poll-based event/log watching. (WebSocket clients should use `Subscription` instead.) Install a
+filter, then poll it with `getFilterChanges` / `getFilterLogs`, and tear it down with
+`uninstallFilter`.
 
-**Function:** `async submitWork(nonce: string, powHash: string, mixDigest: string): Promise<any>`
+### newFilter
 
-**Description:** Used for submitting a proof-of-work solution.
+**Function:** `async newFilter(filter: LogFilter): Promise<string>`
 
-**Input Parameters:**
-- `nonce` (string): The nonce
-- `powHash` (string): The proof-of-work hash
-- `mixDigest` (string): The mix digest
+**Description:** Install a log filter. Returns the filter id.
 
-**Response:** Promise<any> - Submission result
+**Response:** Promise<string> - filter id
 
 **Example:**
 ```typescript
-const result = await provider.submitWork('0x1234...', '0x5678...', '0x9abc...');
-console.log('Work submission result:', result);
+const filterId = await provider.newFilter({
+  address: '0x1234...',
+  topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'],
+  fromBlock: 'latest',
+});
 ```
 
-### getWork
+### newBlockFilter
 
-**Function:** `async getWork(): Promise<any>`
+**Function:** `async newBlockFilter(): Promise<string>`
 
-**Description:** Used for obtaining a proof-of-work problem.
+**Description:** Install a filter that reports new block hashes. Returns the filter id.
 
-**Input Parameters:** None
+**Response:** Promise<string> - filter id
 
-**Response:** Promise<any> - Work object
+### newPendingTransactionFilter
+
+**Function:** `async newPendingTransactionFilter(): Promise<string>`
+
+**Description:** Install a filter that reports new pending-transaction hashes. Returns the filter id.
+
+**Response:** Promise<string> - filter id
+
+### getFilterChanges
+
+**Function:** `async getFilterChanges(filterId: string): Promise<Log[] | string[]>`
+
+**Description:** Poll a filter for what changed since the last poll. For a log filter this returns
+`Log[]`; for a block / pending-tx filter it returns an array of `0x`-hex hashes.
+
+**Input Parameters:**
+- `filterId` (string): The filter id
+
+**Response:** Promise<Log[] | string[]>
 
 **Example:**
 ```typescript
-const work = await provider.getWork();
-console.log('Work:', work);
+const changes = await provider.getFilterChanges(filterId);
+```
+
+### getFilterLogs
+
+**Function:** `async getFilterLogs(filterId: string): Promise<Log[]>`
+
+**Description:** Return ALL logs matching a (log) filter id — the full set, not just the delta.
+
+**Input Parameters:**
+- `filterId` (string): The filter id
+
+**Response:** Promise<Log[]>
+
+### uninstallFilter
+
+**Function:** `async uninstallFilter(filterId: string): Promise<boolean>`
+
+**Description:** Tear down a filter. Returns `true` if it existed.
+
+**Input Parameters:**
+- `filterId` (string): The filter id
+
+**Response:** Promise<boolean>
+
+### watchLogs
+
+**Function:** `async watchLogs(filter: LogFilter, onLogs: (logs: Log[]) => void, opts?: { intervalMs?: number; onError?: (e: unknown) => void }): Promise<() => Promise<void>>`
+
+**Description:** Poll-based log watcher for HTTP transports. Installs a filter via `newFilter`, polls
+`getFilterChanges` every `intervalMs` (default 4000), and invokes `onLogs` with each non-empty batch.
+Resolves to an async `stop()` that uninstalls the filter and halts polling.
+
+**Input Parameters:**
+- `filter` (LogFilter): The log filter
+- `onLogs` ((logs: Log[]) => void): Callback for each non-empty batch of logs
+- `opts` (object, optional): `{ intervalMs?, onError? }`
+
+**Response:** Promise<() => Promise<void>> - an async `stop()` function
+
+**Example:**
+```typescript
+const stop = await provider.watchLogs(
+  { address: '0x1234...', fromBlock: 'latest' },
+  (logs) => console.log('new logs:', logs),
+  { intervalMs: 4000 }
+);
+// later:
+await stop();
 ```
 
 ## Personal Methods
@@ -741,22 +847,34 @@ const signature = await provider.personalSign('0x12345678', '0x1234...', 'myPass
 console.log('Signature:', signature);
 ```
 
-### ecRecover
+### ecRecover (REMOVED)
 
 **Function:** `async ecRecover(data: string, signature: string): Promise<string>`
 
-**Description:** Recovers the address that signed a piece of data.
+**Description:** REMOVED — this method now throws. ML-DSA-87 has NO key recovery, so the upgraded node removed `personal_ecRecover` entirely. Calling `provider.ecRecover(...)` throws immediately:
+
+> `ecRecover is not supported: ML-DSA-87 has no key recovery. Use verifyMessage(data, signature, publicKey) (personal_verifyMessage) with the signer public key.`
+
+Use [`verifyMessage`](#verifymessage) instead — it takes the signer's public key (there is nothing to recover it from) and returns the verified signer address.
+
+### verifyMessage
+
+**Function:** `async verifyMessage(data: string, signature: string, publicKey: string): Promise<string>`
+
+**Description:** Verifies an ML-DSA-87 personal-message signature and returns the signer's address. This is the post-wire-break replacement for `ecRecover`: because ML-DSA-87 has no key recovery, the signer's public key MUST be supplied. Maps to the node's `personal_verifyMessage`.
 
 **Input Parameters:**
-- `data` (string): The original data
-- `signature` (string): The signature
+- `data` (string): The original message (utf-8 string or 0x-hex)
+- `signature` (string): The 0x-hex ML-DSA-87 signature
+- `publicKey` (string): The RAW 2592-byte ML-DSA-87 public key of the claimed signer, as `0x` + 5184 hex chars
 
-**Response:** Promise<string> - Recovered address
+**Response:** Promise<string> - The verified signer address, computed as `keccak256(rawPubkeyBytes)[12:]`. Throws if the signature does not verify.
 
 **Example:**
 ```typescript
-const address = await provider.ecRecover('0x12345678', '0x1234...');
-console.log('Recovered address:', address);
+// publicKey is the raw 2592-byte ML-DSA-87 key: '0x' + 5184 hex chars
+const address = await provider.verifyMessage('0x12345678', '0xSIGNATURE...', '0xPUBLICKEY...');
+console.log('Verified signer address:', address);
 ```
 
 ### unlockAccount

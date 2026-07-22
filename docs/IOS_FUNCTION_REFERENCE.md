@@ -379,7 +379,7 @@ interface TransactionArgs {
   to?: string;              // Recipient address
   value?: string;           // Amount to send in wei
   data?: string;            // Transaction data (for smart contracts)
-  chainId?: number;         // Chain ID (1 for Ethereum mainnet)
+  chainId: number;          // NCOG Earth Chain testnet (0x9af); REQUIRED, bound into the ML-DSA-87 SigningHash
 }
 ```
 
@@ -428,9 +428,9 @@ const transactionArgs = {
   gasPrice: "0x09184e72a000", // 20 Gwei
   gasLimit: "0x27100",        // 100,000 gas
   to: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
-  value: "0x00",              // 0 ETH
+  value: "0x00",              // 0 (no value)
   data: "0x",                 // No data
-  chainId: 1                  // Ethereum mainnet
+  chainId: 2479               // NCOG Earth Chain testnet (0x9af); REQUIRED, bound into the ML-DSA-87 SigningHash
 };
 
 const privateKey = "a1b2c3d4e5f6..."; // Your private key
@@ -566,7 +566,7 @@ class WalletService {
         to: toAddress,
         value: amount,
         data: "0x",
-        chainId: 1
+        chainId: 2479 // NCOG Earth Chain testnet (0x9af); REQUIRED, bound into the ML-DSA-87 SigningHash
       };
 
       const signedTx = await WalletModule.signTransactionMobile(txArgs, privateKey);
@@ -597,7 +597,7 @@ console.log('Decrypted data:', decrypted);
 const tx = await walletService.sendTransaction(
   wallet.privateKey,
   "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
-  "0x2386f26fc10000" // 0.01 ETH
+  "0x2386f26fc10000" // 0.01 (1e16 wei)
 );
 console.log('Signed transaction:', tx);
 ```

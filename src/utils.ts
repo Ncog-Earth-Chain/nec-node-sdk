@@ -334,6 +334,13 @@ export function kyberPrivateKeyToEncryptedPublicKeyAddress(skHex: string): strin
   return toHexString(ek);
 }
 
+/**
+ * @deprecated Removed from the public API in v2 and NOT interoperable with the node. This derives an
+ * address from an ML-KEM (Kyber) ENCAPSULATION key via a scheme (sha3_512 of a hex string) the chain
+ * never uses — the node's account address is keccak256(rawMLDSApubkeyBytes)[12:] (see
+ * tx-signer.publicKeyToAddress / privateKeyToAddress). A Kyber key is an encryption key, not an account
+ * key. Do not use for any on-chain identity.
+ */
 export function kyberPrivateKeyToPublicKeyAddress(skHex: string): string {
   const ek = kyberPrivateKeyToEncryptedPublicKeyAddress(skHex);
   return generateAccountAddress(ek);
@@ -351,6 +358,11 @@ export function mldsaPublicKeyToAddress(publicKey: string): string {
 }
 
 /**
+ * @deprecated NOT interoperable with the node. This signs the RAW message bytes (no EIP-191 prefix, no
+ * keccak), so the resulting signature will NOT verify via the node's personal_verifyMessage. Use
+ * signPersonalMessageMLDSA (and verifyPersonalMessageMLDSA) when the signature must be checkable on-chain
+ * or by the node. Dropped from the public index exports in v2; retained here only for backward source use.
+ *
  * Sign a message using MLDSA with a private key.
  * @param message - The message to sign
  * @param privateKey - The private key to sign with (hex string)
@@ -392,6 +404,10 @@ export async function signMessageMLDSA(
 }
 
 /**
+ * @deprecated Counterpart to the deprecated signMessageMLDSA — verifies a RAW-bytes signature (no
+ * EIP-191 prefix) and is therefore NOT interoperable with node personal_sign output. Use
+ * verifyPersonalMessageMLDSA instead. Dropped from the public index exports in v2.
+ *
  * Verify an MLDSA signature against a message and public key.
  * @param message - The original message that was signed
  * @param signature - The MLDSA signature (hex string)
@@ -426,6 +442,77 @@ export async function verifyMLDSASignature(
     return mldsa.verify(publicKeyBytes, messageBytes, signatureBytes);
   } catch (error) {
     console.error('Error verifying MLDSA signature:', error);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// EIP-191 personal-message signing — interoperable with the node's personal_sign /
+// personal_verifyMessage. The node verifies over accounts.TextHash(data):
+//   keccak256("\x19Ethereum Signed Message:\n" + len(dataBytes) + dataBytes)
+// NOTE: signMessageMLDSA / verifyMLDSASignature above sign the RAW message bytes (no prefix, no keccak)
+// and are therefore NOT interoperable with the node's personal_verifyMessage — use the *Personal*
+// variants below when the signature must be verifiable on-chain / by the node.
+// ---------------------------------------------------------------------------
+
+// personalTextHash resolves `message` to bytes (Uint8Array as-is, 0x-hex decoded, else utf-8) and returns
+// the EIP-191 TextHash — the exact 32-byte digest the node's personal_verifyMessage checks against.
+export function personalTextHash(message: string | Uint8Array): Uint8Array {
+  let msg: Uint8Array;
+  if (message instanceof Uint8Array) {
+    msg = message;
+  } else if (typeof message === 'string' && /^0x[0-9a-fA-F]*$/.test(message)) {
+    msg = hexToUint8Array(message);
+  } else {
+    msg = new TextEncoder().encode(message);
+  }
+  const prefix = new TextEncoder().encode('\x19Ethereum Signed Message:\n' + msg.length);
+  const buf = new Uint8Array(prefix.length + msg.length);
+  buf.set(prefix, 0);
+  buf.set(msg, prefix.length);
+  return keccak_256(buf);
+}
+
+/**
+ * Sign a personal message with ML-DSA-87 using the EIP-191 digest the node verifies against.
+ * The resulting signature is verifiable via the node's personal_verifyMessage(data, sig, pubkey).
+ * @param message - utf-8 string, 0x-hex, or raw bytes (matched to how the node received `data`).
+ * @param privateKey - bare-hex ML-DSA private key (no 0x prefix).
+ * @returns the signature as BARE hex (no 0x prefix) — pass it (and a bare-hex public key) straight to
+ *   verifyPersonalMessageMLDSA. Note: this is not the 0x-prefixed convention used elsewhere in the SDK.
+ */
+export async function signPersonalMessageMLDSA(
+  message: string | Uint8Array,
+  privateKey: string,
+  algorithm: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87' = 'ml_dsa87'
+): Promise<string> {
+  // @ts-ignore - bundled JS without types
+  const noblePQ = await import('./noble-post-quantum.js') as any;
+  const mldsa = (noblePQ.default || noblePQ)[algorithm];
+  if (!mldsa) throw new Error(`Unsupported MLDSA algorithm: ${algorithm}`);
+  const sig = mldsa.sign(hexToUint8Array(privateKey), personalTextHash(message));
+  return toHexString(sig);
+}
+
+/**
+ * Verify a personal-message ML-DSA-87 signature over the EIP-191 digest (node-compatible).
+ * @param signature - BARE hex signature (no 0x prefix), as returned by signPersonalMessageMLDSA.
+ * @param publicKey - BARE hex raw ML-DSA-87 public key (no 0x prefix).
+ * @returns true iff the signature verifies against the message + public key.
+ */
+export async function verifyPersonalMessageMLDSA(
+  message: string | Uint8Array,
+  signature: string,
+  publicKey: string,
+  algorithm: 'ml_dsa44' | 'ml_dsa65' | 'ml_dsa87' = 'ml_dsa87'
+): Promise<boolean> {
+  try {
+    // @ts-ignore - bundled JS without types
+    const noblePQ = await import('./noble-post-quantum.js') as any;
+    const mldsa = (noblePQ.default || noblePQ)[algorithm];
+    if (!mldsa) throw new Error(`Unsupported MLDSA algorithm: ${algorithm}`);
+    return mldsa.verify(hexToUint8Array(publicKey), personalTextHash(message), hexToUint8Array(signature));
+  } catch {
     return false;
   }
 }

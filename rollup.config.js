@@ -2,7 +2,7 @@
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
-import typescript from 'rollup-plugin-typescript2';
+import typescript from '@rollup/plugin-typescript';
 import polyfill from 'rollup-plugin-polyfill-node';
 import url from '@rollup/plugin-url';
 import pkg from './package.json';
@@ -29,7 +29,7 @@ export default [
     onwarn: onWarn,
     plugins: [
       json(),
-      typescript({ tsconfigOverride: { compilerOptions: { module: 'ESNext' } } }),
+      typescript({ tsconfig: './tsconfig.json', declaration: false, compilerOptions: { module: 'ESNext' } }),
       resolve({ preferBuiltins: true }),
       commonjs({ transformMixedEsModules: true }),
     ],
@@ -48,7 +48,7 @@ export default [
     onwarn: onWarn,
     plugins: [
       json(),
-      typescript(),
+      typescript({ tsconfig: './tsconfig.json', declaration: false }),
       resolve({ preferBuiltins: true }),
       commonjs({ transformMixedEsModules: true }),
     ],
@@ -75,7 +75,7 @@ export default [
       resolve({ browser: true, preferBuiltins: false }),
       commonjs({ transformMixedEsModules: true }),
       json(),
-      typescript(),
+      typescript({ tsconfig: './tsconfig.json', declaration: false }),
       url({ include: ['**/*.wasm'] })
     ],
     output: {
@@ -106,7 +106,7 @@ export default [
       resolve({ browser: true, preferBuiltins: false }),
       commonjs({ transformMixedEsModules: true }),
       json(),
-      typescript(),
+      typescript({ tsconfig: './tsconfig.json', declaration: false }),
       url({ include: ['**/*.wasm'] })
     ],
     output: {
@@ -133,7 +133,7 @@ export default [
       resolve({ browser: true, preferBuiltins: false }),
       commonjs({ transformMixedEsModules: true }),
       json(),
-      typescript(),
+      typescript({ tsconfig: './tsconfig.json', declaration: false }),
     ],
     output: {
       file: 'dist/index.react-native.esm.js',
