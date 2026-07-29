@@ -13,6 +13,52 @@ const externals = [
   ...require('module').builtinModules,
 ];
 
+// Swap the WebSocket factory for a platform-specific one.
+//
+// src/websocket/factory.ts is the default (Node, and the generic "Node & Bundlers" ESM
+// build) and still picks a socket at runtime, because that build is loaded in environments
+// this config cannot know. The react-native and browser bundles have exactly one answer
+// each, so they get a variant with no branch -- and, crucially, no reference to the Node
+// `ws` package.
+//
+// That reference is the whole point. A runtime `if (isNode) { await import('ws') }` cannot
+// be tree-shaken, so `ws` used to appear in EVERY bundle. Metro resolves dynamic imports
+// statically, followed it into ws/lib/websocket.js, hit its require('net'), and failed every
+// React Native release build -- forcing each consumer to alias `ws` away in their own
+// metro.config.js. Choosing the module here means the import is simply not emitted.
+//
+// Written as a small inline plugin rather than pulling in @rollup/plugin-alias: this is a
+// published package, and a build-only dependency is still one more thing to keep current
+// for four lines of resolveId.
+// The variants are named factory-<variant>.ts, with a HYPHEN. factory.<variant>.ts reads
+// better and does not work: resolvers treat the trailing segment as a file extension, so
+// `./websocket/factory.react-native` is looked up as a `.react-native` file, never resolves,
+// and -- because a resolveId hook that returns nothing simply defers -- the default factory
+// is silently kept. The bundle then still contains `import('ws')` and the build reports
+// success, which is exactly how this went unnoticed the first time.
+//
+// Hence the explicit failure below: if the swap cannot happen, the build stops rather than
+// emitting a bundle that is broken only on the consumer's device.
+function websocketFactory(variant) {
+  return {
+    name: 'nec-websocket-factory',
+    async resolveId(source, importer) {
+      if (!importer || !/(^|\/)websocket\/factory$/.test(source)) return null;
+
+      const target = source.replace(/factory$/, `factory-${variant}`);
+      const resolved = await this.resolve(target, importer, { skipSelf: true });
+      if (!resolved) {
+        this.error(
+          `nec-websocket-factory: cannot resolve "${target}" (imported by ${importer}). ` +
+          `Without it the ${variant} bundle keeps the default factory and its import of the ` +
+          `Node "ws" package, which breaks React Native consumers at bundle time.`
+        );
+      }
+      return resolved.id;
+    },
+  };
+}
+
 // Custom warning handler to suppress unresolved node built-in warnings in browser builds
 function onWarn(warning, warn) {
   // Suppress unresolved dependency warnings for node built-ins in browser build
@@ -64,6 +110,7 @@ export default [
     input: 'src/index.browser.ts',
     onwarn: onWarn,
     plugins: [
+      websocketFactory('browser'),
       polyfill({
         globals: {
           BigInt: 'BigInt',
@@ -95,6 +142,7 @@ export default [
     input: 'src/index.browser.ts',
     onwarn: onWarn,
     plugins: [
+      websocketFactory('browser'),
       polyfill({
         globals: {
           BigInt: 'BigInt',
@@ -114,7 +162,7 @@ export default [
       format: 'esm',
       inlineDynamicImports: true,
     },
-    external: ['ws']
+    // No `external: ['ws']`: this bundle no longer references it at all.
   },
 
   // ———————— React Native ESM ————————
@@ -122,6 +170,7 @@ export default [
     input: 'src/index.react-native.ts',
     onwarn: onWarn,
     plugins: [
+      websocketFactory('react-native'),
       polyfill({
         globals: {
           BigInt: 'BigInt',
@@ -140,6 +189,6 @@ export default [
       format: 'esm',
       inlineDynamicImports: true,
     },
-    external: ['ws']
+    // No `external: ['ws']`: this bundle no longer references it at all.
   }
 ];

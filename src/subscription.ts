@@ -10,10 +10,10 @@ export interface SubscriptionHandler {
   (data: any): void;
 }
 
-// Environment detection
-const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
-const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
-const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
+// How a WebSocket is obtained is decided by the BUILD, not by a runtime check here -- see
+// ./websocket/factory.ts. A runtime branch could not be tree-shaken, so the Node-only
+// `import('ws')` ended up in the React Native bundle and broke it.
+import { createWebSocket, deliversBuffers } from './websocket/factory';
 
 export class Subscription {
   private ws: any; // WebSocket (browser) or ws (Node.js)
@@ -36,18 +36,8 @@ export class Subscription {
       }
   
       try {
-        if (isNode) {
-          const { WebSocket } = await import('ws'); // dynamically import
-          this.ws = new WebSocket(this.url);
-        } else if (isReactNative) {
-          this.ws = new WebSocket(this.url); // built-in global
-        } else if (isBrowser) {
-          this.ws = new window.WebSocket(this.url);
-        } else {
-          reject(new Error('Unsupported environment for WebSocket'));
-          return;
-        }
-  
+        this.ws = await createWebSocket(this.url);
+
         this.ws.onopen = () => {
           this.isConnected = true;
           this.emit('open');
@@ -63,7 +53,7 @@ export class Subscription {
         };
         this.ws.onmessage = (event: any) => {
           let data = event.data;
-          if (isNode && Buffer.isBuffer(data)) {
+          if (deliversBuffers && Buffer.isBuffer(data)) {
             data = data.toString('utf8');
           }
           try {
