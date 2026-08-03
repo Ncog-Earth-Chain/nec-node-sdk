@@ -15,7 +15,7 @@ export interface GraphqlParams {
 
 /**
  * Universal GraphQL query function using Axios for account queries.
- * Handles normalization of balances, values, tx counts, delegations, and staker info.
+ * Handles normalization of balances, values, tx counts, and staker info.
  */
 export async function getAllTransactions(params: GraphqlParams): Promise<any> {
   if (!params.url || typeof params.url !== 'string') {
@@ -114,24 +114,15 @@ export async function getAllTransactions(params: GraphqlParams): Promise<any> {
           createdTime
           isActive
         }
-        delegations {
-          totalCount
-          edges {
-            delegation {
-              toStakerId
-              createdTime
-              amount
-              claimedReward
-              pendingRewards {
-                amount
-              }
-            }
-            cursor
-          }
-        }
       }
     }
   `;
+  // `account.delegations` is deliberately absent. Stake delegation is not offered on chain, so the
+  // field was removed from the explorer API -- and because GraphQL validates the whole document
+  // before executing any of it, asking for one missing field failed the ENTIRE query. That took
+  // transaction history down with it in both wallets: getAllTransactions returned an errors object,
+  // every caller saw no account, and the UI reported an account with no transactions rather than a
+  // broken request. Do not re-add a field here without confirming the deployed schema serves it.
   try {
     const response = await axios.post(url, {
       query,
@@ -172,21 +163,8 @@ export async function getAllTransactions(params: GraphqlParams): Promise<any> {
         });
       }
     }
-    if (account.delegations) {
-      if (account.delegations.totalCount) account.delegations.totalCount = hexToDecimalString(account.delegations.totalCount);
-      if (Array.isArray(account.delegations.edges)) {
-        account.delegations.edges.forEach((edge: any) => {
-          if (!edge?.delegation) return;
-          if (edge.delegation.amount) edge.delegation.amount = hexToEther(edge.delegation.amount);
-          if (edge.delegation.claimedReward) edge.delegation.claimedReward = hexToEther(edge.delegation.claimedReward);
-          if (Array.isArray(edge.delegation.pendingRewards)) {
-            edge.delegation.pendingRewards.forEach((pendingReward: any) => {
-              if (pendingReward?.amount) pendingReward.amount = hexToEther(pendingReward.amount);
-            });
-          }
-        });
-      }
-    }
+    // Delegation normalization removed with the query field above: the API no longer serves it, so
+    // this branch could only ever be dead code.
     if (account.staker) {
       if (account.staker.createdTime) account.staker.createdTime = hexToDecimalString(account.staker.createdTime);
       if (account.staker.totalCount) account.staker.totalCount = hexToDecimalString(account.staker.totalCount);
