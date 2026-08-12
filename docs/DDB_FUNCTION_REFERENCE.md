@@ -18,7 +18,7 @@ import {
   type DdbProcedureDef,
   type DdbEndorsementStatus,
   type DdbRow,
-} from 'necjs';
+} from '@ncog/necjs';
 ```
 
 ---
@@ -396,7 +396,7 @@ A `balances` table keyed by a natural PK (`account`), with an `update` point op 
 point op:
 
 ```typescript
-import { validateContractDefinition, type ContractDefinition } from 'necjs';
+import { validateContractDefinition, type ContractDefinition } from '@ncog/necjs';
 
 const CONTRACT_ADDRESS = '0x0000000000000000000000000000000000abcdef';
 
@@ -521,7 +521,7 @@ For callers that sign an operation manually (the `*Signed` methods do this for y
 the exact canonical encoders the chain recomputes:
 
 ```typescript
-import { canonicalDdbOperationHash, canonicalDdbRequestId } from 'necjs';
+import { canonicalDdbOperationHash, canonicalDdbRequestId } from '@ncog/necjs';
 
 // keccak256("NEC-DDB-OP\x01" ‖ typeByte ‖ len(schemaName) ‖ len(data) ‖ from(20B) ‖ u64(ts) ‖ u64(gasLimit))
 canonicalDdbOperationHash(
@@ -552,7 +552,7 @@ Both are consensus-critical and pinned by a golden vector against the node's can
 ## 7. End-to-end: deploy, track, read
 
 ```typescript
-import { Provider, Ddb, type ContractDefinition } from 'necjs';
+import { Provider, Ddb, type ContractDefinition } from '@ncog/necjs';
 
 const provider = new Provider('https://rpc.ncog.earth');
 const ddb = new Ddb(provider);

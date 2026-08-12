@@ -265,7 +265,7 @@ contract.events.Transfer({ fromBlock: 'latest' })
 ### Basic Contract Interaction
 
 ```typescript
-import { Contract, Provider } from 'necjs';
+import { Contract, Provider } from '@ncog/necjs';
 
 // Create provider and contract
 const provider = new Provider('https://mainnet.infura.io/v3/YOUR_PROJECT_ID');
@@ -283,7 +283,7 @@ console.log('Balance:', result);
 ### Contract Deployment
 
 ```typescript
-import { Contract } from 'necjs';
+import { Contract } from '@ncog/necjs';
 
 // Deploy a contract
 const deployment = await Contract.deploy({

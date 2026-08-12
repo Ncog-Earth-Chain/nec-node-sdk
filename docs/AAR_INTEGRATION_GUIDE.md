@@ -18,7 +18,7 @@ This guide provides comprehensive instructions for integrating the Wallet AAR (A
 ### 1. Install the NECJS SDK
 
 ```bash
-npm install necjs
+npm install @ncog/necjs
 ```
 
 ### 2. Add AAR to your React Native project
@@ -174,7 +174,7 @@ npx react-native run-android
 ### Import the SDK
 
 ```typescript
-import { Provider, Contract, ContractFactory } from 'necjs';
+import { Provider, Contract, ContractFactory } from '@ncog/necjs';
 import { NativeModules } from 'react-native';
 
 const { WalletModule } = NativeModules;
@@ -247,7 +247,7 @@ export const signTransaction = async (
 ### 3. Complete Transaction Example
 
 ```typescript
-import { Provider } from 'necjs';
+import { Provider } from '@ncog/necjs';
 import { NativeModules } from 'react-native';
 
 const { WalletModule } = NativeModules;
@@ -313,7 +313,7 @@ export class ReactNativeWallet {
 ### ERC-20 Token Operations
 
 ```typescript
-import { Provider, Contract, decimalToWei } from 'necjs';
+import { Provider, Contract, decimalToWei } from '@ncog/necjs';
 import { NativeModules } from 'react-native';
 
 const { WalletModule } = NativeModules;

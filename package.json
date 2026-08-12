@@ -1,5 +1,5 @@
 {
-  "name": "necjs",
+  "name": "@ncog/necjs",
   "version": "2.0.1",
   "description": "NECJS SDK for NCOG Earth Chain RPC",
   "main": "dist/index.cjs.js",
@@ -111,5 +111,8 @@
   },
   "files": [
     "dist/"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -3,7 +3,7 @@
 You can use the NECJS SDK directly in any Node.js application. Example:
 
 ```js
-const { loadWasm, Provider, Wallet } = require('necjs');
+const { loadWasm, Provider, Wallet } = require('@ncog/necjs');
 
 (async () => {
   await loadWasm(); // Required for cryptography
@@ -19,7 +19,7 @@ const { loadWasm, Provider, Wallet } = require('necjs');
 ## Contract Deployment Example
 
 ```js
-const { Provider, Wallet, ContractFactory, loadWasm } = require('necjs');
+const { Provider, Wallet, ContractFactory, loadWasm } = require('@ncog/necjs');
 
 (async () => {
   await loadWasm();
@@ -40,7 +40,7 @@ const { Provider, Wallet, ContractFactory, loadWasm } = require('necjs');
 ## Real-Time Event Subscription Example
 
 ```js
-const { Subscription } = require('necjs');
+const { Subscription } = require('@ncog/necjs');
 
 const wsUrl = 'wss://rpc.ncog.earth';
 const sub = new Subscription(wsUrl);
@@ -71,7 +71,7 @@ caller's ML-DSA-87 key (`createSchemaSigned` / `callProcedureSigned` / `grantRol
 `select` / `query`) query the node's Postgres directly with no consensus.
 
 ```js
-const { loadWasm, Provider, Wallet, Ddb } = require('necjs');
+const { loadWasm, Provider, Wallet, Ddb } = require('@ncog/necjs');
 
 (async () => {
   await loadWasm();

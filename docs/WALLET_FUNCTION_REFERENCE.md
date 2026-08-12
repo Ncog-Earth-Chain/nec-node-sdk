@@ -226,7 +226,7 @@ const decodedTx = await signer.decode('0x...');
 ### Basic Wallet Creation and Connection
 
 ```typescript
-import { Provider, Wallet } from 'necjs';
+import { Provider, Wallet } from '@ncog/necjs';
 
 // Create wallet from private key (address derived automatically)
 const wallet = await Wallet.create('0x1234567890abcdef...');

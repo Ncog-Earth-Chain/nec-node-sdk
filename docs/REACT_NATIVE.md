@@ -5,13 +5,13 @@ This SDK provides a React Native specific export that excludes wallet and MLKEM 
 ## Installation
 
 ```bash
-npm install necjs
+npm install @ncog/necjs
 ```
 
 ### Import
 ```javascript
 // React Native will automatically use the React Native specific export
-import { Provider, Contract, ContractFactory } from 'necjs';
+import { Provider, Contract, ContractFactory } from '@ncog/necjs';
 ```
 
 ### Available Exports
@@ -28,7 +28,7 @@ The React Native version includes:
 ### Example
 
 ```javascript
-import { Provider, Contract } from 'necjs';
+import { Provider, Contract } from '@ncog/necjs';
 
 // Create a provider
 const provider = new Provider('https://rpc.ncog.earth');
@@ -69,7 +69,7 @@ The AAR integration guide includes:
 
 ### Quick Start for AAR Integration
 
-1. **Install the SDK**: `npm install necjs`
+1. **Install the SDK**: `npm install @ncog/necjs`
 2. **Get AAR file**: [mobile_apps.aar](https://github.com/Ncog-Earth-Chain/nec-node-sdk/) from the project root directory
 3. **Add AAR file**: Place `mobile_apps.aar` in `android/app/libs/`
 4. **Configure build.gradle**: Add dependencies and flatDir repository

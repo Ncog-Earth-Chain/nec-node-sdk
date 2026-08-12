@@ -5,7 +5,7 @@ Integrate the NECJS SDK in a NestJS service for blockchain operations. Example:
 ```ts
 // src/ncog/ncog.service.ts
 import { Injectable } from '@nestjs/common';
-import { loadWasm, Provider, Wallet } from 'necjs';
+import { loadWasm, Provider, Wallet } from '@ncog/necjs';
 
 @Injectable()
 export class NcogService {
@@ -37,7 +37,7 @@ Then inject and use `NcogService` in your controllers or other services as neede
 
 ```ts
 import { Injectable } from '@nestjs/common';
-import { loadWasm, Provider, Wallet, ContractFactory } from 'necjs';
+import { loadWasm, Provider, Wallet, ContractFactory } from '@ncog/necjs';
 
 @Injectable()
 export class ContractService {
@@ -69,7 +69,7 @@ export class ContractService {
 
 ```ts
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Subscription } from 'necjs';
+import { Subscription } from '@ncog/necjs';
 
 @Injectable()
 export class EventService implements OnModuleDestroy {
@@ -106,7 +106,7 @@ caller's ML-DSA-87 key (the `*Signed` methods) and return an endorsement `reques
 
 ```ts
 import { Injectable } from '@nestjs/common';
-import { loadWasm, Provider, Wallet, Ddb, ContractDefinition } from 'necjs';
+import { loadWasm, Provider, Wallet, Ddb, ContractDefinition } from '@ncog/necjs';
 
 @Injectable()
 export class DdbService {

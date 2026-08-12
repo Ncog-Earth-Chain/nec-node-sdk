@@ -81,7 +81,7 @@ const customContract = await factory.deploy([], {
 ### Basic Contract Factory Setup
 
 ```typescript
-import { Provider, ContractFactory, Wallet } from 'necjs';
+import { Provider, ContractFactory, Wallet } from '@ncog/necjs';
 
 // Create provider and signer
 const provider = new Provider('https://mainnet.infura.io/v3/YOUR_PROJECT_ID');
@@ -157,7 +157,7 @@ const contract = await deployContractSafely(factory, ['Initial Value']);
 ### Factory with Different Signer Types
 
 ```typescript
-import { ContractFactory, ExtensionSigner } from 'necjs';
+import { ContractFactory, ExtensionSigner } from '@ncog/necjs';
 
 // With wallet signer
 const walletFactory = new ContractFactory(abi, bytecode, provider, walletSigner);

@@ -960,7 +960,7 @@ console.log('Resolved address:', address);
 ### Basic Provider Setup
 
 ```typescript
-import { Provider } from 'necjs';
+import { Provider } from '@ncog/necjs';
 
 // Create provider instance
 const provider = new Provider('https://mainnet.infura.io/v3/YOUR_PROJECT_ID');

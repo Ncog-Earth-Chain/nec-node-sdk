@@ -5,7 +5,7 @@ The main entry point for the SDK is:
 [src/index.ts](../src/index.ts)
 
 ```ts
-import { Provider, Wallet, Ddb /* ... */ } from 'necjs';
+import { Provider, Wallet, Ddb /* ... */ } from '@ncog/necjs';
 ```
 
 ---

@@ -9,7 +9,7 @@ This guide shows how to integrate the NCOG SDK in popular frontend frameworks, i
 ### Using Wallet
 ```jsx
 import React, { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'necjs';
+import { loadWasm, Provider, Wallet } from '@ncog/necjs';
 
 function App() {
   const [balance, setBalance] = useState(null);
@@ -38,7 +38,7 @@ export default App;
 ### Using Extension Wallet
 ```jsx
 import React, { useEffect, useState } from 'react';
-import { Provider, ExtensionSigner } from 'necjs';
+import { Provider, ExtensionSigner } from '@ncog/necjs';
 
 function App() {
   const [address, setAddress] = useState(null);
@@ -76,7 +76,7 @@ export default App;
 ### Using Wallet
 ```js
 import { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'necjs';
+import { loadWasm, Provider, Wallet } from '@ncog/necjs';
 
 export default function Home() {
   const [balance, setBalance] = useState(null);
@@ -103,7 +103,7 @@ export default function Home() {
 ### Using Extension Wallet
 ```js
 import { useEffect, useState } from 'react';
-import { Provider, ExtensionSigner } from 'necjs';
+import { Provider, ExtensionSigner } from '@ncog/necjs';
 
 export default function Home() {
   const [address, setAddress] = useState(null);
@@ -139,7 +139,7 @@ export default function Home() {
 ### Using Wallet
 ```jsx
 import { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'necjs';
+import { loadWasm, Provider, Wallet } from '@ncog/necjs';
 
 function App() {
   const [balance, setBalance] = useState(null);
@@ -168,7 +168,7 @@ export default App;
 ### Using Extension Wallet
 ```jsx
 import { useEffect, useState } from 'react';
-import { Provider, ExtensionSigner } from 'necjs';
+import { Provider, ExtensionSigner } from '@ncog/necjs';
 
 function App() {
   const [address, setAddress] = useState(null);
@@ -204,7 +204,7 @@ export default App;
 ## Contract Deployment & Interaction Example
 
 ```js
-import { Provider, Wallet, ContractFactory } from 'necjs';
+import { Provider, Wallet, ContractFactory } from '@ncog/necjs';
 
 (async () => {
   await loadWasm();
@@ -233,7 +233,7 @@ import { Provider, Wallet, ContractFactory } from 'necjs';
 ## Real-Time Event Subscription Example
 
 ```js
-import { Subscription } from 'necjs';
+import { Subscription } from '@ncog/necjs';
 
 const wsUrl = 'wss://rpc.ncog.earth';
 const sub = new Subscription(wsUrl);
@@ -257,7 +257,7 @@ const subId = await sub.subscribe('newHeads', [], (blockHeader) => {
 ## Utility Function Examples
 
 ```js
-import { isValidAddress, hexToDecimalString, etherToWeiHex } from 'necjs';
+import { isValidAddress, hexToDecimalString, etherToWeiHex } from '@ncog/necjs';
 
 console.log(isValidAddress('0x123...')); // true/false
 console.log(hexToDecimalString('0x1a')); // '26'
@@ -273,7 +273,7 @@ Reads from the on-chain DDB need no signing and are safe from a frontend. `Ddb.s
 to get the schema (db_name) for any schema-scoped call.
 
 ```js
-import { Provider, Ddb } from 'necjs';
+import { Provider, Ddb } from '@ncog/necjs';
 
 (async () => {
   const provider = new Provider('https://rpc.ncog.earth');

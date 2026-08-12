@@ -78,7 +78,7 @@ YourReactNativeApp/
 ### Step 1: Install NECJS SDK
 
 ```bash
-npm install necjs
+npm install @ncog/necjs
 ```
 
 ### Step 2: Add AAR Library
@@ -303,7 +303,7 @@ class MainApplication : Application(), ReactApplication {
 ### Step 1: Install NECJS SDK
 
 ```bash
-npm install necjs
+npm install @ncog/necjs
 ```
 
 ### Step 2: Add XCFramework
@@ -797,7 +797,7 @@ export const signTransaction = async (
 ### 3. Complete Transaction Example
 
 ```typescript
-import { Provider } from 'necjs';
+import { Provider } from '@ncog/necjs';
 import { NativeModules } from 'react-native';
 
 const { WalletModule } = NativeModules;
@@ -867,7 +867,7 @@ export class ReactNativeWallet {
 ### ERC-20 Token Operations
 
 ```typescript
-import { Provider, Contract, decimalToWei } from 'necjs';
+import { Provider, Contract, decimalToWei } from '@ncog/necjs';
 import { NativeModules } from 'react-native';
 
 const { WalletModule } = NativeModules;

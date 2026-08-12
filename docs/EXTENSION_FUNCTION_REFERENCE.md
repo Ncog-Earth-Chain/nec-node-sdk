@@ -140,7 +140,7 @@ console.log('Transaction hash:', txHash);
 ### Basic Extension Setup
 
 ```typescript
-import { ExtensionSigner } from 'necjs';
+import { ExtensionSigner } from '@ncog/necjs';
 import { Provider } from './provider';
 
 // Create provider

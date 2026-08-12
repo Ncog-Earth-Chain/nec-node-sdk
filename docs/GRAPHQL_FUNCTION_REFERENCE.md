@@ -81,7 +81,7 @@ The function automatically normalizes the following hex values to decimal:
 
 **Example:**
 ```typescript
-import { getAllTransactions } from 'necjs';
+import { getAllTransactions } from '@ncog/necjs';
 
 const params = {
   url: 'https://graphql.example.com',
@@ -225,7 +225,7 @@ The function automatically normalizes token amounts from hex to Ether using the 
 
 **Example:**
 ```typescript
-import { getAllTokens } from 'necjs';
+import { getAllTokens } from '@ncog/necjs';
 
 const params = {
   url: 'https://graphql.example.com',
@@ -269,7 +269,7 @@ try {
 ### Fetching Account Transactions
 
 ```typescript
-import { getAllTransactions } from 'necjs';
+import { getAllTransactions } from '@ncog/necjs';
 
 // Basic transaction query
 const transactionParams = {
@@ -307,7 +307,7 @@ if (accountData.txList && accountData.txList.edges) {
 ### Paginated Transaction Queries
 
 ```typescript
-import { getAllTransactions } from 'necjs';
+import { getAllTransactions } from '@ncog/necjs';
 
 // First page
 const firstPageParams = {
@@ -339,7 +339,7 @@ const secondPage = await getAllTransactions(secondPageParams);
 ### Fetching Token Information
 
 ```typescript
-import { getAllTokens } from 'necjs';
+import { getAllTokens } from '@ncog/necjs';
 
 // Query token summaries
 const tokenParams = {
@@ -366,7 +366,7 @@ if (tokenData.tokenSummaries) {
 ### Error Handling
 
 ```typescript
-import { getAllTransactions, getAllTokens } from 'necjs';
+import { getAllTransactions, getAllTokens } from '@ncog/necjs';
 
 async function fetchAccountData(address: string) {
   try {
@@ -415,7 +415,7 @@ try {
 ### Working with Contract Information
 
 ```typescript
-import { getAllTransactions } from 'necjs';
+import { getAllTransactions } from '@ncog/necjs';
 
 const contractParams = {
   url: 'https://api.example.com/graphql',
@@ -442,7 +442,7 @@ if (accountData.contract) {
 ### Working with Staking Information
 
 ```typescript
-import { getAllTransactions } from 'necjs';
+import { getAllTransactions } from '@ncog/necjs';
 
 const stakerParams = {
   url: 'https://api.example.com/graphql',

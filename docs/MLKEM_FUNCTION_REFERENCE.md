@@ -78,7 +78,7 @@ interface MlKem {
 
 **Example:**
 ```typescript
-import { loadWasm } from 'necjs';
+import { loadWasm } from '@ncog/necjs';
 
 try {
   const mlkem = await loadWasm();
@@ -115,7 +115,7 @@ try {
 
 **Example:**
 ```typescript
-import { loadWasmFromBuffer } from 'necjs';
+import { loadWasmFromBuffer } from '@ncog/necjs';
 
 // Load WASM from buffer (e.g., from a bundler)
 const wasmBuffer = await fetch('/path/to/mlkem.wasm').then(r => r.arrayBuffer());
@@ -283,7 +283,7 @@ console.log('Decoded transaction:', decodedTx);
 ### Basic MLKEM Setup
 
 ```typescript
-import { loadWasm } from 'necjs';
+import { loadWasm } from '@ncog/necjs';
 
 async function setupMLKEM() {
   try {
@@ -350,7 +350,7 @@ console.log('Derived address:', address);
 > Note: the Go-WASM `mlkem.signTransactionMLDSA87` signing path is deprecated — it emits the rejected legacy 8-field / hex-ASCII-pubkey format. Use the native exported signer below, which folds `chainId` into the ML-DSA-87 SigningHash for replay protection.
 
 ```typescript
-import { signTransactionMLDSA87 } from 'necjs';
+import { signTransactionMLDSA87 } from '@ncog/necjs';
 
 // Sign a transaction with ML-DSA-87 (native signer)
 const txObject = {

@@ -271,7 +271,7 @@ if (success) {
 ### Basic WebSocket Connection and Event Handling
 
 ```typescript
-import { Subscription } from 'necjs';
+import { Subscription } from '@ncog/necjs';
 
 // Create subscription instance
 const subscription = new Subscription('wss://mainnet.infura.io/ws/v3/YOUR_PROJECT_ID');

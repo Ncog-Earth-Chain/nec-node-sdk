@@ -20,7 +20,7 @@ Includes post-quantum cryptography, wallet management, contract interaction, ext
 
 ### Package Information
 
-- **Name**: `necjs`
+- **Name**: `@ncog/necjs`
 - **License**: MIT
 - **Repository**: https://github.com/Ncog-Earth-Chain/nec-node-sdk
 - **Author**: developer@ncog.earth
@@ -68,10 +68,10 @@ Includes post-quantum cryptography, wallet management, contract interaction, ext
 
 ```bash
 # Install the package
-npm install necjs
+npm install @ncog/necjs
 
 # Or using yarn
-yarn add necjs
+yarn add @ncog/necjs
 ```
 
 ### Requirements
@@ -105,7 +105,7 @@ The project uses Rollup for bundling with multiple output formats:
 ### 1. Basic Wallet Operations
 
 ```javascript
-import { loadWasm, Provider, Wallet } from 'necjs';
+import { loadWasm, Provider, Wallet } from '@ncog/necjs';
 
 async function basicWalletExample() {
   // Initialize WebAssembly
@@ -127,7 +127,7 @@ async function basicWalletExample() {
 ### 2. Smart Contract Interaction
 
 ```javascript
-import { Provider, Contract } from 'necjs';
+import { Provider, Contract } from '@ncog/necjs';
 
 async function contractExample() {
   const provider = new Provider('https://rpc.ncog.earth');
@@ -148,7 +148,7 @@ async function contractExample() {
 ### 3. Contract Deployment
 
 ```javascript
-import { Provider, ContractFactory, Wallet } from 'necjs';
+import { Provider, ContractFactory, Wallet } from '@ncog/necjs';
 
 async function deployContract() {
   const provider = new Provider('https://rpc.ncog.earth');
@@ -171,7 +171,7 @@ async function deployContract() {
 ### 4. Browser Extension Integration
 
 ```javascript
-import { Provider, ExtensionSigner } from 'necjs';
+import { Provider, ExtensionSigner } from '@ncog/necjs';
 
 async function extensionExample() {
   if (window.ncogWallet) {
@@ -195,7 +195,7 @@ async function extensionExample() {
 ### 5. Real-time Subscriptions
 
 ```javascript
-import { Subscription } from 'necjs';
+import { Subscription } from '@ncog/necjs';
 
 async function subscriptionExample() {
   // Subscription takes a WebSocket URL and must be connected before subscribing.
@@ -223,7 +223,7 @@ async function subscriptionExample() {
 ### 6. Post-Quantum Cryptography
 
 ```javascript
-import { loadWasm } from 'necjs';
+import { loadWasm } from '@ncog/necjs';
 
 async function mlkemExample() {
   // loadWasm() resolves to an MlKem INSTANCE (ML-KEM-1024, key-exchange + AEAD only).
@@ -248,7 +248,7 @@ async function mlkemExample() {
 
 ```javascript
 import React, { useEffect, useState } from 'react';
-import { loadWasm, Provider, Wallet } from 'necjs';
+import { loadWasm, Provider, Wallet } from '@ncog/necjs';
 
 function WalletComponent() {
   const [balance, setBalance] = useState(null);
@@ -280,7 +280,7 @@ function WalletComponent() {
 ### 8. Decentralized Database (DDB)
 
 ```javascript
-import { Provider, Ddb } from 'necjs';
+import { Provider, Ddb } from '@ncog/necjs';
 
 async function ddbExample(privateKeyHex, contractDefinition, contractAddress) {
   const provider = new Provider('https://rpc.ncog.earth');
@@ -392,7 +392,7 @@ See the [DDB Function Reference](docs/DDB_FUNCTION_REFERENCE.md) for the full `D
 
 - **NCOG Earth Chain Website**: [https://ncog.earth](https://ncog.earth)
 - **GitHub Repository**: [https://github.com/Ncog-Earth-Chain/nec-node-sdk](https://github.com/Ncog-Earth-Chain/nec-node-sdk)
-- **npm Package**: [https://www.npmjs.com/package/necjs](https://www.npmjs.com/package/necjs)
+- **npm Package**: [https://www.npmjs.com/package/@ncog/necjs](https://www.npmjs.com/package/@ncog/necjs)
 
 ### Contributing
 

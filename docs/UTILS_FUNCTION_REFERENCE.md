@@ -344,7 +344,7 @@ import {
   generateMLDSAKeyPair,
   signPersonalMessageMLDSA,
   verifyPersonalMessageMLDSA,
-} from 'necjs';
+} from '@ncog/necjs';
 
 const { publicKey, privateKey } = await generateMLDSAKeyPair();
 
@@ -397,7 +397,7 @@ import {
   hexToEther, 
   parseUnits, 
   formatUnits 
-} from 'necjs';
+} from '@ncog/necjs';
 
 // Convert Ether to Wei hex
 const weiHex = etherToWeiHex('1.5'); // '0x14d1120d7b1600000000'
@@ -415,7 +415,7 @@ const formatted = formatUnits(customUnits, 6); // '1.5'
 ### NEC Token Operations
 
 ```typescript
-import { hexToNec, necToHex, weiToNec } from 'necjs';
+import { hexToNec, necToHex, weiToNec } from '@ncog/necjs';
 
 // Convert NEC hex to decimal
 const necAmount = hexToNec('0x1bc16d674ec80000'); // '2.0'
@@ -430,7 +430,7 @@ const necFromWei = weiToNec('0x1bc16d674ec80000'); // '2.0'
 ### RPC Operations
 
 ```typescript
-import { serializeForRpc, normalizeResponse } from 'necjs';
+import { serializeForRpc, normalizeResponse } from '@ncog/necjs';
 
 // Serialize transaction for RPC
 const txParams = {
@@ -456,7 +456,7 @@ const normalized = normalizeResponse(rpcResponse);
 ### Address Validation
 
 ```typescript
-import { isValidAddress } from 'necjs';
+import { isValidAddress } from '@ncog/necjs';
 
 // Validate Ethereum addresses
 const validAddress = '0x1234567890123456789012345678901234567890';
@@ -469,7 +469,7 @@ console.log(isValidAddress(invalidAddress)); // false
 ### Hex Conversions
 
 ```typescript
-import { hexToDecimalString, decimalToHex } from 'necjs';
+import { hexToDecimalString, decimalToHex } from '@ncog/necjs';
 
 // Convert hex to decimal
 const decimal = hexToDecimalString('0x1bc16d674ec80000'); // 2000000000000000000

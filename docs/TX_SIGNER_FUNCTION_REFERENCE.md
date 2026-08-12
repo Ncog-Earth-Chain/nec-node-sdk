@@ -14,7 +14,7 @@ import {
   decodeRLPTransaction,
   type SignedTx,
   type SignOptions,
-} from 'necjs';
+} from '@ncog/necjs';
 ```
 
 > **Wire-format toggles were removed in v2.** `chainId` is **always** bound into the signing digest
@@ -95,7 +95,7 @@ interface SignOptions {
 
 **Example:**
 ```typescript
-import { Provider, signTransactionMLDSA87, etherToWeiHex } from 'necjs';
+import { Provider, signTransactionMLDSA87, etherToWeiHex } from '@ncog/necjs';
 
 const provider = new Provider('https://rpc.ncog.earth');
 const from = '0x1234567890123456789012345678901234567890';
