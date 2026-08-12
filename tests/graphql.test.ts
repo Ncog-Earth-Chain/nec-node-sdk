@@ -91,10 +91,19 @@ describe('getAllTransactions', () => {
     expect(result.txList.edges[0].transaction.block.number).toBe('dec(0x7)');
     expect(result.txList.edges[0].transaction.block.timestamp).toBe('dec(0x8)');
     expect(result.txList.edges[0].transaction.tokenTransactions[0].amount).toBe('ether(0x9)');
-    expect(result.delegations.totalCount).toBe('dec(0xa)');
-    expect(result.delegations.edges[0].delegation.amount).toBe('ether(0xb)');
-    expect(result.delegations.edges[0].delegation.claimedReward).toBe('ether(0xc)');
-    expect(result.delegations.edges[0].delegation.pendingRewards[0].amount).toBe('ether(0xd)');
+    // account.delegations is deliberately NOT requested and NOT normalized: stake delegation is not
+    // offered on chain, so the field was removed from the explorer API. GraphQL validates the whole
+    // document before executing any of it, so asking for it failed the ENTIRE query and took
+    // transaction history down in both wallets. The mock above still supplies delegations precisely
+    // so that a re-added normalization step would show up here as a value that changed.
+    expect(result.delegations.totalCount).toBe('0xa');
+    expect(result.delegations.edges[0].delegation.amount).toBe('0xb');
+    // The regression eb5187f fixed, guarded directly: the document sent to the explorer must not ask
+    // for the field at all. Asserting on the response shape alone would not catch a re-added query
+    // field, because the mock answers whatever is asked.
+    const sentQuery: string = (axios.post as jest.Mock).mock.calls[0][1].query;
+    expect(sentQuery).not.toMatch(/delegations/);
+
     expect(result.staker.createdTime).toBe('dec(0xe)');
     expect(result.staker.totalCount).toBe('dec(0xf)');
     expect(result.staker.totalValue).toBe('ether(0x10)');
