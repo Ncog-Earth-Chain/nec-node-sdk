@@ -123,7 +123,7 @@ const ddb = new Ddb(provider);
   - `privateKey` — the caller's `0x`-hex ML-DSA-87 private key.
   - `schemaName` — the raw **contract name**.
   - `definition` — a raw JSON string **or** a typed `ContractDefinition`.
-  - `opts?` — `DdbSignOptions` (`timestamp`, `gasLimit`).
+  - `opts?` — `DdbSignOptions` (`timestamp`, `gasLimit`, `nonce`).
 - **Returns:** the endorsement `requestId` (`0x`-hex string).
 - **Notes:** when `definition` is a typed object, `validateContractDefinition` runs client-side first
   and this method **throws** if `errors` is non-empty (a malformed `point_write` the node would
@@ -213,8 +213,9 @@ interface DdbQueryOptions {
 }
 
 interface DdbSignOptions {
-  timestamp?: number; // unix seconds; defaults to now
-  gasLimit?: number;  // defaults to 100000
+  timestamp?: number;        // unix seconds; defaults to now
+  gasLimit?: number;         // defaults to 100000
+  nonce?: number | bigint;   // defaults to 8 cryptographically random bytes
 }
 
 type DdbRow = Record<string, unknown>;
@@ -253,7 +254,7 @@ interface DdbStorageStats {
 }
 ```
 
-> `DdbSignOptions.timestamp` and `.gasLimit` are both part of the signed canonical hash — the node
+> `DdbSignOptions.timestamp`, `.gasLimit` and `.nonce` are all part of the signed canonical hash — the node
 > uses exactly these values. Override them only for deterministic tests, not in normal use.
 
 ---
@@ -523,7 +524,10 @@ the exact canonical encoders the chain recomputes:
 ```typescript
 import { canonicalDdbOperationHash, canonicalDdbRequestId } from '@ncog/necjs';
 
-// keccak256("NEC-DDB-OP\x01" ‖ typeByte ‖ len(schemaName) ‖ len(data) ‖ from(20B) ‖ u64(ts) ‖ u64(gasLimit))
+// keccak256("NEC-DDB-OP\x01" ‖ typeByte ‖ len(schemaName) ‖ len(data) ‖ from(20B) ‖ u64(ts) ‖ u64(gasLimit) ‖ u64(nonce))
+//
+// The nonce is the LAST field. Omitting it, or moving it, produces a hash the chain does not
+// reproduce, and the operation is rejected with "caller signature verification failed".
 canonicalDdbOperationHash(
   typeByte: number,        // op-type tag: createschema=0, callprocedure=7, grantrole=8, revokerole=9
   schemaName: string,
@@ -531,6 +535,7 @@ canonicalDdbOperationHash(
   fromAddr: string,        // 20-byte hex
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,  // replay protection; MUST be fresh per submission
 ): Uint8Array;
 
 // keccak256(canonicalOperationBytes ‖ requester) — the requestId the *Signed methods return.
@@ -541,6 +546,7 @@ canonicalDdbRequestId(
   fromAddr: string,
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,  // the SAME nonce you signed with
   requester: string,       // 20-byte hex
 ): Uint8Array;
 ```

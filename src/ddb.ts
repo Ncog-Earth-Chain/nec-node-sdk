@@ -1,4 +1,5 @@
 import { keccak_256 } from '@noble/hashes/sha3';
+import { randomBytes } from '@noble/hashes/utils';
 import { Provider } from './provider';
 import { type ContractDefinition, validateContractDefinition } from './ddb-schema';
 
@@ -27,6 +28,14 @@ export interface DdbQueryOptions {
 export interface DdbSignOptions {
   timestamp?: number; // unix seconds; defaults to now
   gasLimit?: number;  // defaults to 100000
+  /**
+   * Replay-protection nonce, part of the SIGNED preimage. Defaults to 8 cryptographically random
+   * bytes, which is what you want: the node cannot fill this in (it is covered by your signature),
+   * and without a fresh value two submissions you mean to be distinct are byte-identical, so a
+   * replay of one is indistinguishable from the original. Pass an explicit value only when you need
+   * a deterministic hash (tests, golden vectors).
+   */
+  nonce?: number | bigint;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,10 +147,25 @@ function ddbLenPrefixed(data: Uint8Array): Uint8Array {
 }
 
 /**
+ * A fresh 64-bit replay-protection nonce, from the platform CSPRNG.
+ *
+ * `randomBytes` THROWS when no CSPRNG is available rather than falling back to `Math.random()`. That
+ * is deliberate: a predictable nonce silently removes the replay protection it exists to provide, and
+ * a signer that fails loudly is far better than one that keeps working and is forgeable. (This wallet
+ * family has been bitten by exactly that substitution before.)
+ */
+function ddbRandomNonce(): bigint {
+  const b = randomBytes(8);
+  let n = BigInt(0);
+  for (let i = 0; i < 8; i++) n = (n << BigInt(8)) | BigInt(b[i]);
+  return n;
+}
+
+/**
  * canonicalDdbOperationHash is the 32-byte Keccak-256 an off-node caller signs to authorize a DDB
  * operation — the exact value the chain recomputes in gossip/ddb.CanonicalOperationHash. Encoding:
  *   keccak256( "NEC-DDB-OP\x01" || typeByte || lenPrefix(schemaName) || lenPrefix(data) ||
- *              from(20B) || u64BE(timestamp) || u64BE(gasLimit) )
+ *              from(20B) || u64BE(timestamp) || u64BE(gasLimit) || u64BE(nonce) )
  * `data` are the EXACT operation payload bytes (must be compact JSON — the bytes you submit). Advanced
  * callers can use this to sign an operation manually; the Ddb.*Signed methods do it for you.
  */
@@ -152,6 +176,7 @@ function canonicalDdbOperationBytes(
   fromAddr: string,
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,
 ): Uint8Array {
   const enc = new TextEncoder();
   const fromBytes = ddbHexToBytes(fromAddr);
@@ -164,6 +189,11 @@ function canonicalDdbOperationBytes(
     fromBytes,
     ddbU64BE(timestamp),
     ddbU64BE(gasLimit),
+    // The nonce is the LAST field, immediately after gasLimit. This position is not a style choice:
+    // the node appends it in exactly this place (gossip/ddb/canonical.go, `b = appendU64(b, op.Nonce)`)
+    // and hashes the result, so a signer that omits it or moves it produces a hash the chain will not
+    // reproduce and the operation is rejected with "caller signature verification failed".
+    ddbU64BE(nonce),
   );
 }
 
@@ -174,8 +204,9 @@ export function canonicalDdbOperationHash(
   fromAddr: string,
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,
 ): Uint8Array {
-  return keccak_256(canonicalDdbOperationBytes(typeByte, schemaName, data, fromAddr, timestamp, gasLimit));
+  return keccak_256(canonicalDdbOperationBytes(typeByte, schemaName, data, fromAddr, timestamp, gasLimit, nonce));
 }
 
 /**
@@ -190,11 +221,15 @@ export function canonicalDdbRequestId(
   fromAddr: string,
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,
   requester: string,
 ): Uint8Array {
   const reqBytes = ddbHexToBytes(requester);
   if (reqBytes.length !== 20) throw new Error(`invalid requester length: ${reqBytes.length} (expected 20)`);
-  return keccak_256(ddbConcat(canonicalDdbOperationBytes(typeByte, schemaName, data, fromAddr, timestamp, gasLimit), reqBytes));
+  return keccak_256(ddbConcat(
+    canonicalDdbOperationBytes(typeByte, schemaName, data, fromAddr, timestamp, gasLimit, nonce),
+    reqBytes,
+  ));
 }
 
 // One-time deprecation warning for the legacy server-signed DDB methods (fires once per method per process).
@@ -295,13 +330,16 @@ export class Ddb {
     const dataBytes = new TextEncoder().encode(compact);
     const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000);
     const gasLimit = opts.gasLimit ?? 100000;
+    // Fresh per submission. The node cannot supply this — it is inside the hash the caller signs — so
+    // an SDK that does not send one leaves every operation replayable with the caller's own signature.
+    const nonce = opts.nonce ?? ddbRandomNonce();
 
     const mldsa = await ddbGetMldsa();
     const sk = ddbHexToBytes(privateKey);
     const pub: Uint8Array = mldsa.derivePublicKey(sk);
     const from = '0x' + ddbBytesToHex(keccak_256(pub).slice(-20));
 
-    const hash = canonicalDdbOperationHash(DDB_OP_TYPE[typeName], schemaName, dataBytes, from, timestamp, gasLimit);
+    const hash = canonicalDdbOperationHash(DDB_OP_TYPE[typeName], schemaName, dataBytes, from, timestamp, gasLimit, nonce);
     const sig: Uint8Array = mldsa.sign(sk, hash);
 
     const signed = {
@@ -311,6 +349,7 @@ export class Ddb {
       from,
       timestamp: '0x' + timestamp.toString(16),
       gasLimit: '0x' + gasLimit.toString(16),
+      nonce: '0x' + nonce.toString(16),
       callerPubKey: '0x' + ddbBytesToHex(pub),
       callerSig: '0x' + ddbBytesToHex(sig),
     };
@@ -319,7 +358,9 @@ export class Ddb {
     // write's lifecycle (endorsement quorum -> block finality -> async durable Postgres apply) via
     // getEndorsementStatus / waitForEndorsement. It is NOT a committed EVM tx hash: DDB commit txs are
     // authored by the leader, so a caller cannot know one up-front; the requestId is the stable handle.
-    return '0x' + ddbBytesToHex(canonicalDdbRequestId(DDB_OP_TYPE[typeName], schemaName, dataBytes, from, timestamp, gasLimit, from));
+    return '0x' + ddbBytesToHex(
+      canonicalDdbRequestId(DDB_OP_TYPE[typeName], schemaName, dataBytes, from, timestamp, gasLimit, nonce, from),
+    );
   }
 
   /**

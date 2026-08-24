@@ -27,7 +27,10 @@ describe('DDB signed-op submit envelope', () => {
     const schemaName = 'users_abcdef';
     const ts = 1000;
     const gas = 100000;
-    const requestId = await ddb.callProcedureSigned(skHex, schemaName, 'addUser', ['alice', '30'], { timestamp: ts, gasLimit: gas });
+    // An explicit nonce pins the envelope and the requestId. Production callers omit it and get fresh
+    // random bytes -- covered by the freshness test below, which is the property that actually matters.
+    const nonce = 0x2a;
+    const requestId = await ddb.callProcedureSigned(skHex, schemaName, 'addUser', ['alice', '30'], { timestamp: ts, gasLimit: gas, nonce });
 
     // one RPC, the signed-op submit
     expect(sent).toHaveLength(1);
@@ -40,6 +43,10 @@ describe('DDB signed-op submit envelope', () => {
     expect(env.from.toLowerCase()).toBe(GOLDEN_ADDRESS); // keccak256(rawPubkey)[12:]
     expect(env.timestamp).toBe('0x' + ts.toString(16));
     expect(env.gasLimit).toBe('0x' + gas.toString(16));
+    // The node CANNOT fill the nonce in -- it is inside the hash the caller signed -- so an envelope
+    // without it leaves the node reading 0 and every operation replayable with the caller's own
+    // signature. This assertion is the whole reason the field is on the wire.
+    expect(env.nonce).toBe('0x' + nonce.toString(16));
     expect(env.callerPubKey.toLowerCase()).toBe('0x' + Buffer.from(pub).toString('hex'));
     expect(typeof env.callerSig).toBe('string');
     expect(env.callerSig.startsWith('0x')).toBe(true);
@@ -51,10 +58,26 @@ describe('DDB signed-op submit envelope', () => {
 
     // return value is the endorsement requestId = keccak256(canonicalBytes || requester)
     const expected = '0x' + Buffer.from(
-      canonicalDdbRequestId(DDB_OP_CALLPROCEDURE, schemaName, dataBytes, GOLDEN_ADDRESS, ts, gas, GOLDEN_ADDRESS),
+      canonicalDdbRequestId(DDB_OP_CALLPROCEDURE, schemaName, dataBytes, GOLDEN_ADDRESS, ts, gas, nonce, GOLDEN_ADDRESS),
     ).toString('hex');
     expect(requestId).toBe(expected);
     expect(requestId).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('uses a FRESH random nonce per submission when none is given', async () => {
+    const { skHex } = await deterministicKey();
+    const sent: any[] = [];
+    const provider: any = { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } };
+    const ddb = new Ddb(provider);
+    // Same operation, same timestamp: without a fresh nonce these two envelopes would be byte-identical,
+    // which is exactly what made a replay indistinguishable from the original.
+    await ddb.callProcedureSigned(skHex, 'users_abcdef', 'addUser', ['alice'], { timestamp: 1000 });
+    await ddb.callProcedureSigned(skHex, 'users_abcdef', 'addUser', ['alice'], { timestamp: 1000 });
+    expect(sent).toHaveLength(2);
+    expect(sent[0].nonce).not.toBe(sent[1].nonce);
+    expect(sent[0].nonce).toMatch(/^0x[0-9a-f]+$/);
+    // ...and because the nonce is signed, the signatures differ too.
+    expect(sent[0].callerSig).not.toBe(sent[1].callerSig);
   });
 
   it('deriveDbName lowercases contractName + last-6 of address', () => {
