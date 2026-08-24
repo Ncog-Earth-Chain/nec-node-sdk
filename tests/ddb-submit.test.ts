@@ -24,7 +24,7 @@ describe('DDB signed-op submit envelope', () => {
     const provider: any = { send: (method: string, params: any[]) => { sent.push({ method, params }); return Promise.resolve('0xnode-op-hash'); } };
     const ddb = new Ddb(provider);
 
-    const schemaName = 'users_abcdef';
+    const schemaName = 'c_0000000000000000000000000000000000abcdef';
     const ts = 1000;
     const gas = 100000;
     // An explicit nonce pins the envelope and the requestId. Production callers omit it and get fresh
@@ -71,8 +71,8 @@ describe('DDB signed-op submit envelope', () => {
     const ddb = new Ddb(provider);
     // Same operation, same timestamp: without a fresh nonce these two envelopes would be byte-identical,
     // which is exactly what made a replay indistinguishable from the original.
-    await ddb.callProcedureSigned(skHex, 'users_abcdef', 'addUser', ['alice'], { timestamp: 1000 });
-    await ddb.callProcedureSigned(skHex, 'users_abcdef', 'addUser', ['alice'], { timestamp: 1000 });
+    await ddb.callProcedureSigned(skHex, 'c_0000000000000000000000000000000000abcdef', 'addUser', ['alice'], { timestamp: 1000 });
+    await ddb.callProcedureSigned(skHex, 'c_0000000000000000000000000000000000abcdef', 'addUser', ['alice'], { timestamp: 1000 });
     expect(sent).toHaveLength(2);
     expect(sent[0].nonce).not.toBe(sent[1].nonce);
     expect(sent[0].nonce).toMatch(/^0x[0-9a-f]+$/);
@@ -80,8 +80,20 @@ describe('DDB signed-op submit envelope', () => {
     expect(sent[0].callerSig).not.toBe(sent[1].callerSig);
   });
 
-  it('deriveDbName lowercases contractName + last-6 of address', () => {
-    expect(Ddb.deriveDbName('Users', '0x0000000000000000000000000000000000ABCDEF')).toBe('users_abcdef');
+  // Mirrors the node's ddbschema.DeriveDbName: "c_" + the full address, lowercased, no 0x. The old
+  // contractName + last-6 form is gone from the node (commit 1345890) because a 6-hex suffix collides
+  // and the contract name is caller-supplied, so two contracts could be made to name one schema.
+  it('deriveDbName is "c_" + the full lowercased address', () => {
+    expect(Ddb.deriveDbName('0x0000000000000000000000000000000000ABCDEF'))
+      .toBe('c_0000000000000000000000000000000000abcdef');
+    expect(Ddb.deriveDbName('0000000000000000000000000000000000abcdef'))
+      .toBe('c_0000000000000000000000000000000000abcdef');
+  });
+
+  it('deriveDbName refuses an address that cannot name a schema', () => {
+    expect(() => Ddb.deriveDbName('')).toThrow(/invalid contract address/);
+    expect(() => Ddb.deriveDbName('0x')).toThrow(/invalid contract address/);
+    expect(() => Ddb.deriveDbName('0xnot-hex')).toThrow(/invalid contract address/);
   });
 });
 

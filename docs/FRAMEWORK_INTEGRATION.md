@@ -269,7 +269,7 @@ console.log(etherToWeiHex(1)); // '0x...' (Wei value for 1 NEC)
 ## DDB (Decentralized Database) Example
 
 Reads from the on-chain DDB need no signing and are safe from a frontend. `Ddb.select` /
-`Ddb.query` query the node's Postgres directly. Use `Ddb.deriveDbName(contractName, contractAddress)`
+`Ddb.query` query the node's Postgres directly. Use `Ddb.deriveDbName(contractAddress)`
 to get the schema (db_name) for any schema-scoped call.
 
 ```js
@@ -279,7 +279,7 @@ import { Provider, Ddb } from '@ncog/necjs';
   const provider = new Provider('https://rpc.ncog.earth');
   const ddb = new Ddb(provider);
 
-  const dbName = Ddb.deriveDbName('users', contractAddress); // e.g. 'users_abcdef'
+  const dbName = Ddb.deriveDbName(contractAddress); // e.g. 'c_0000...abcdef'
   const rows = await ddb.select(dbName, 'accounts', { limit: 50 });
   console.log('rows:', rows);
 })();

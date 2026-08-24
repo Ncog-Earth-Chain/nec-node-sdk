@@ -276,14 +276,14 @@ async function ddbGetMldsa(): Promise<any> {
  *
  * SCHEMA NAMING: createSchema* takes the CONTRACT NAME — the node derives the underlying db_name from
  * the definition's contract_name + contract_address. EVERY OTHER schema-scoped method takes the
- * DERIVED db_name = `Ddb.deriveDbName(contractName, contractAddress)`.
+ * DERIVED db_name = `Ddb.deriveDbName(contractAddress)`.
  *
  * @example
  *   const provider = new Provider('https://rpc.ncog.earth');
  *   const ddb = new Ddb(provider);
  *   // Deploy: the caller signs with their ML-DSA private key; the node derives `from` from that key.
  *   const txHash = await ddb.createSchemaSigned(myPrivKeyHex, 'users', schemaJson);
- *   const schema = Ddb.deriveDbName('users', contractAddress); // 'users_abcdef'
+ *   const schema = Ddb.deriveDbName(contractAddress); // 'c_<40 hex>'
  *   // ...after the create tx finalizes...
  *   const rows = await ddb.select(schema, 'accounts', { limit: 50 });
  *   const callTx = await ddb.callProcedureSigned(myPrivKeyHex, schema, 'addUser', ['alice', '30']);
@@ -293,12 +293,29 @@ export class Ddb {
 
   /**
    * Derive the schema (db_name) a contract's tables / procedures / roles live under, mirroring the
-   * node's ddbschema.DeriveDbName: `lowercase(contractName + "_" + last-6-chars-of-contractAddress)`.
+   * node's ddbschema.DeriveDbName: `"c_" + the contract address, lowercased, without 0x`.
+   *
+   * It used to be `contractName + "_" + last-6-of-address`, and the node moved off that deliberately:
+   * a 6-hex suffix is short enough to collide, and the contract NAME is caller-supplied, so two
+   * contracts could be made to name the same Postgres schema. The full address is the registry's own
+   * UNIQUE key and is not attacker-choosable, which removes the class of bug rather than narrowing it.
+   * The name is display metadata now and never part of an identifier -- hence no `contractName`
+   * parameter.
+   *
+   * Throws on an empty or non-hex address. The node returns "" there and lets validateIdentifier
+   * reject it downstream; failing at the call site is more useful to a client, which would otherwise
+   * go on to name a schema that cannot exist.
+   *
    * Use this for every schema-scoped method EXCEPT createSchema* (which takes the raw contract name).
-   * @example Ddb.deriveDbName('users', '0x0000000000000000000000000000000000abcdef') // 'users_abcdef'
+   * @example Ddb.deriveDbName('0x0000000000000000000000000000000000abcdef')
+   *          // 'c_0000000000000000000000000000000000abcdef'
    */
-  static deriveDbName(contractName: string, contractAddress: string): string {
-    return `${contractName}_${contractAddress.slice(-6)}`.toLowerCase();
+  static deriveDbName(contractAddress: string): string {
+    const hex = contractAddress.trim().toLowerCase().replace(/^0x/, '');
+    if (!hex || !/^[0-9a-f]+$/.test(hex)) {
+      throw new Error(`invalid contract address for deriveDbName: ${JSON.stringify(contractAddress)}`);
+    }
+    return 'c_' + hex;
   }
 
   // Raw pass-through (NOT callRpc): ddb params are plain JSON (strings, string[], structured opts with

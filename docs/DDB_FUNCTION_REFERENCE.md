@@ -85,11 +85,11 @@ This is the single most common source of confusion:
 - **`createSchemaSigned` takes the raw CONTRACT NAME** (e.g. `'balances'`). The node derives the
   underlying `db_name` from the definition's `contract_name` + `contract_address`.
 - **Every other schema-scoped method takes the DERIVED `db_name`** — compute it with
-  `Ddb.deriveDbName(contractName, contractAddress)`.
+  `Ddb.deriveDbName(contractAddress)`.
 
 ```typescript
-Ddb.deriveDbName('balances', '0x0000000000000000000000000000000000abcdef');
-// => 'balances_abcdef'   (lowercase(contractName + '_' + last 6 chars of address))
+Ddb.deriveDbName('0x0000000000000000000000000000000000abcdef');
+// 'c_0000000000000000000000000000000000abcdef'
 ```
 
 Methods that take the derived `db_name`: `callProcedureSigned`, `grantRoleSigned`,
@@ -108,10 +108,11 @@ const ddb = new Ddb(provider);
 
 `new Ddb(provider: Provider)` — wraps a `Provider` and exposes the `ddb_*` namespace.
 
-### `static deriveDbName(contractName, contractAddress)`
+### `static deriveDbName(contractAddress)`
 
-- **Signature:** `Ddb.deriveDbName(contractName: string, contractAddress: string): string`
-- **Returns:** `lowercase(contractName + '_' + contractAddress.slice(-6))`.
+- **Signature:** `Ddb.deriveDbName(contractAddress: string): string`
+- **Returns:** `'c_' + the address, lowercased, without `0x`` (the node's ddbschema.DeriveDbName).
+- **Throws:** on an empty or non-hex address, rather than deriving a schema that cannot exist.
 - **Use:** the `db_name` argument for every schema-scoped method except `createSchemaSigned`.
 
 ### Writes — client-signed (production path)
@@ -571,7 +572,7 @@ const deployReq = await ddb.createSchemaSigned(PRIVATE_KEY, 'balances', balances
 await ddb.waitForEndorsement(deployReq);
 
 // 2. Every later call uses the DERIVED db_name.
-const dbName = Ddb.deriveDbName('balances', CONTRACT_ADDRESS);      // 'balances_abcdef'
+const dbName = Ddb.deriveDbName(CONTRACT_ADDRESS);                  // 'c_<40 hex>'
 
 // 3. Call a point-op procedure (args are strings).
 const callReq = await ddb.callProcedureSigned(PRIVATE_KEY, dbName, 'upsertBalance', ['alice', '100']);

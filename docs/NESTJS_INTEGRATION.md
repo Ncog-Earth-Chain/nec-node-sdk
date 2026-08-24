@@ -145,7 +145,7 @@ export class DdbService {
 
   // READ: derive the db_name, then select rows (no consensus).
   async listAccounts(contractAddress: string) {
-    const dbName = Ddb.deriveDbName('users', contractAddress);
+    const dbName = Ddb.deriveDbName(contractAddress);
     return this.ddb.select(dbName, 'accounts', { limit: 50 });
   }
 }

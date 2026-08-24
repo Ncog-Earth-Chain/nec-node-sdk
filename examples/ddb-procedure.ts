@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   const ddb = new Ddb(provider);
 
   // 1. Every schema-scoped call takes the DERIVED db_name, not the raw contract name.
-  const dbName = Ddb.deriveDbName('balances', CONTRACT_ADDRESS); // 'balances_abcdef'
+  const dbName = Ddb.deriveDbName(CONTRACT_ADDRESS); // 'c_' + the 40-hex address
 
   // 2. Call the point-op procedure. Procedure args are always STRINGS. callProcedureSigned
   //    signs with the caller's ML-DSA-87 key and returns the endorsement requestId.
