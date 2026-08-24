@@ -115,6 +115,22 @@ const ddb = new Ddb(provider);
 - **Throws:** on an empty or non-hex address, rather than deriving a schema that cannot exist.
 - **Use:** the `db_name` argument for every schema-scoped method except `createSchemaSigned`.
 
+### `updateSchemaSigned(privateKey, schemaName, definition, opts?)`
+
+- **Signature:** `updateSchemaSigned(privateKey: string, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string>`
+- **Op type:** `updateschema` (`inter.DdbUpdateSchema` = 1).
+- **`schemaName`:** the DERIVED `db_name` (`Ddb.deriveDbName(address)`), not the contract name — unlike
+  `createSchemaSigned`, this names a contract that already exists.
+- **`definition`:** the FULL new contract definition, not a diff. A typed object is validated
+  client-side first and throws synchronously on a malformed `point_write`.
+- **Additive only.** The node accepts a new column, table, procedure or role and refuses dropping a
+  column, changing a type or constraint, and dropping a table or procedure. Role assignments carry
+  forward to the new version.
+- **Returns:** the endorsement `requestId` (track with `waitForEndorsement`).
+
+> Upgrade is the only way a deployed data contract ever changes: schema evolution is strictly
+> additive and `DdbDeleteSchema` is refused by the node. Design contracts as permanent.
+
 ### Writes — client-signed (production path)
 
 #### `createSchemaSigned(privateKey, contractName, definition, opts?)`

@@ -100,6 +100,12 @@ export interface DdbStorageStats {
 // Numeric op-type tags, matching inter.DdbOperationType (iota order). Only mutation ops are signable.
 const DDB_OP_TYPE = {
   createschema: 0,
+  // updateschema is inter.DdbUpdateSchema == 1. It was missing here, which left contract UPGRADES with
+  // no client-signed path at all: the node has supported them on both RPCs since 5e9d431, but the only
+  // way to reach DdbUpdateSchema from outside was hand-rolled ML-DSA signing or running the node with
+  // NEC_DDB_ALLOW_LOCAL_SIGN=1. Schema evolution is strictly additive and a contract cannot be deleted,
+  // so upgrade is the ONLY way a deployed data contract ever changes.
+  updateschema: 1,
   callprocedure: 7,
   grantrole: 8,
   revokerole: 9,
@@ -418,6 +424,26 @@ export class Ddb {
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
     }
     return this.signAndSubmit(privateKey, 'createschema', schemaName, definition, opts);
+  }
+
+  /**
+   * Upgrade a deployed contract, signed by the caller's ML-DSA-87 key. `schemaName` is the derived
+   * db_name (Ddb.deriveDbName), NOT the contract name -- unlike createSchemaSigned, this names a
+   * contract that already exists.
+   *
+   * The change must be ADDITIVE: the node accepts a new column, a new table, a new procedure and a new
+   * role, and refuses dropping a column, changing a type or constraint, and dropping a table or
+   * procedure (ddb/ddbschema/migration.go). Role assignments carry forward to the new version.
+   *
+   * `definition` is the FULL new contract definition, not a diff. A typed object is validated
+   * client-side first, exactly as createSchemaSigned does. Returns the endorsement requestId.
+   */
+  updateSchemaSigned(privateKey: string, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
+    if (typeof definition !== 'string') {
+      const { errors } = validateContractDefinition(definition);
+      if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
+    }
+    return this.signAndSubmit(privateKey, 'updateschema', schemaName, definition, opts);
   }
 
   /** Call a stored procedure, signed by the caller. `schemaName` is the derived db_name (Ddb.deriveDbName). */

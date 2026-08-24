@@ -97,6 +97,50 @@ describe('DDB signed-op submit envelope', () => {
   });
 });
 
+describe('DDB contract upgrade (updateSchemaSigned)', () => {
+  // updateschema is op type 1 (inter.DdbUpdateSchema). It was absent from the SDK's op-type map, so
+  // there was no client-signed path to a contract upgrade at all -- and since schema evolution is
+  // additive-only and contracts cannot be deleted, upgrade is the only way a deployed contract changes.
+  it('submits op type "updateschema" with the full new definition', async () => {
+    const { skHex } = await deterministicKey();
+    const sent: any[] = [];
+    const provider: any = { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } };
+    const ddb = new Ddb(provider);
+
+    const schema = 'c_0000000000000000000000000000000000abcdef';
+    const def = { contract_address: '0x0000000000000000000000000000000000abcdef', contract_name: 'balances', version: '2' };
+    await ddb.updateSchemaSigned(skHex, schema, JSON.stringify(def), { timestamp: 1000, nonce: 7 });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].type).toBe('updateschema');
+    expect(sent[0].schemaName).toBe(schema);
+    const payload = Buffer.from(sent[0].data.slice(2), 'hex').toString('utf8');
+    expect(JSON.parse(payload)).toEqual(def);
+  });
+
+  it('validates a typed definition before submitting, like createSchemaSigned', async () => {
+    const { skHex } = await deterministicKey();
+    const provider: any = { send: () => Promise.reject(new Error('must not reach the node')) };
+    const ddb = new Ddb(provider);
+    const broken: any = {
+      contract_address: '0x0000000000000000000000000000000000abcdef',
+      contract_name: 'balances',
+      version: '2',
+      schema: { tables: [{ name: 'accounts', columns: [{ name: 'id', type: 'bigint', constraints: ['primary key'] }] }] },
+      procedures: [{
+        name: 'setBalance',
+        params: [{ name: 'uid', type: 'bigint' }],
+        body: 'UPDATE accounts SET v = 1 WHERE id > $uid',
+        point_write: { table: 'accounts', op: 'update', pk: [{ column: 'id', param: 'uid' }] },
+      }],
+    };
+    // Throws SYNCHRONOUSLY, before any promise exists -- same as createSchemaSigned. Worth knowing if
+    // you were planning to catch it with .catch(): there is nothing to attach to.
+    expect(() => ddb.updateSchemaSigned(skHex, 'c_0000000000000000000000000000000000abcdef', broken))
+      .toThrow(/invalid contract definition/);
+  });
+});
+
 describe('EIP-191 personal signing (node-interoperable)', () => {
   it('personalTextHash matches the golden EIP-191 digest', () => {
     const h = '0x' + Buffer.from(personalTextHash('hello world')).toString('hex');
