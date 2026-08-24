@@ -5,6 +5,8 @@ export {
 } from './provider';
 export {
   Ddb, canonicalDdbOperationHash, canonicalDdbRequestId,
+  buildDdbOp, privateKeyDdbSigner,
+  type DdbSigner, type DdbSignerLike, type DdbPreparedOp, type DdbSignedOpEnvelope,
   type DdbFilter, type DdbFilterOp, type DdbQueryOptions, type DdbSignOptions,
   type DdbRow, type DdbSchemaInfo, type DdbEndorsementStatus, type DdbConsensusStats,
   type DdbValidatorSet, type DdbStorageStats,

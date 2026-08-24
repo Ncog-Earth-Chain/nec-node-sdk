@@ -262,6 +262,128 @@ async function ddbGetMldsa(): Promise<any> {
   return _ddbMldsa;
 }
 
+
+/**
+ * What the SDK needs from whoever holds the key, so that "sign a DDB operation" does not have to mean
+ * "hand the SDK a raw ML-DSA-87 private key".
+ *
+ * The raw-key form is fine for a script or CI, and it stays supported. It is not fine for a wallet:
+ * a browser extension, a mobile wallet or a hardware device holds the key precisely so that nothing
+ * else sees it, and an API whose only entry point is `(privateKey: string, ...)` locks all three out.
+ * That is why no wallet can authorize a DDB write today.
+ *
+ * Three obligations, and each one is load-bearing:
+ *
+ * - `getAddress()` must return `keccak256(rawMLDSAPublicKey)[12:]`. The node checks `op.From` against
+ *   the public key you send (gossip/ddb.VerifyCallerSignature), so an address derived any other way
+ *   is rejected. In particular it is NOT the ML-KEM-derived data-wallet address.
+ * - `getPublicKey()` returns the RAW ML-DSA-87 public key bytes, which travel on the wire as
+ *   `callerPubKey` and are what the node verifies against.
+ * - `signDdbHash()` signs the 32 bytes it is given, AS GIVEN. It is already the canonical operation
+ *   hash. Do not apply the EIP-191 personal-message prefix to it -- reusing a `personal_sign` path
+ *   here produces a signature over the wrong digest, and the operation is rejected.
+ */
+export interface DdbSigner {
+  getAddress(): string | Promise<string>;
+  getPublicKey(): Uint8Array | Promise<Uint8Array>;
+  signDdbHash(hash: Uint8Array): Uint8Array | Promise<Uint8Array>;
+}
+
+/** Anything the write methods accept as the signing party: a raw private key, or a {@link DdbSigner}. */
+export type DdbSignerLike = string | DdbSigner;
+
+/**
+ * Wrap a raw ML-DSA-87 private key as a {@link DdbSigner}. This is what the SDK does internally when
+ * you pass a key string, so the raw-key path and the wallet path are the same code below the signer.
+ */
+export function privateKeyDdbSigner(privateKey: string): DdbSigner {
+  let cached: { pub: Uint8Array; addr: string } | null = null;
+  const load = async () => {
+    if (cached) return cached;
+    const mldsa = await ddbGetMldsa();
+    const pub: Uint8Array = mldsa.derivePublicKey(ddbHexToBytes(privateKey));
+    cached = { pub, addr: '0x' + ddbBytesToHex(keccak_256(pub).slice(-20)) };
+    return cached;
+  };
+  return {
+    async getAddress() { return (await load()).addr; },
+    async getPublicKey() { return (await load()).pub; },
+    async signDdbHash(hash: Uint8Array) {
+      const mldsa = await ddbGetMldsa();
+      return mldsa.sign(ddbHexToBytes(privateKey), hash) as Uint8Array;
+    },
+  };
+}
+
+function toDdbSigner(s: DdbSignerLike): DdbSigner {
+  return typeof s === 'string' ? privateKeyDdbSigner(s) : s;
+}
+
+/** The `ddb_submitSignedOp` envelope, exactly as the node parses it. */
+export interface DdbSignedOpEnvelope {
+  type: string;
+  schemaName: string;
+  data: string;
+  from: string;
+  timestamp: string;
+  gasLimit: string;
+  nonce: string;
+  callerPubKey: string;
+  callerSig: string;
+}
+
+/** An operation prepared for signing: what to sign, and the envelope it becomes. */
+export interface DdbPreparedOp {
+  /** The 32 bytes to sign. Sign AS-IS -- no EIP-191 prefix. */
+  hash: Uint8Array;
+  /** The endorsement requestId this submission will be tracked by. */
+  requestId: string;
+  /** The envelope, complete except for `callerSig`. */
+  envelope: Omit<DdbSignedOpEnvelope, 'callerSig'>;
+}
+
+/**
+ * Build a DDB operation ready to sign, without signing it. Use this when the key lives somewhere the
+ * SDK cannot reach -- an extension background page, a hardware wallet, a remote signer -- and you want
+ * to hand a 32-byte digest across the boundary and get a signature back.
+ *
+ * `from` and `callerPubKey` must belong to the same key that produces the signature; the node checks
+ * that they agree. `data` is compacted here to the exact bytes covered by the hash, so pass the object
+ * or the JSON text, not pre-encoded bytes.
+ */
+export function buildDdbOp(
+  typeName: DdbOpTypeName,
+  schemaName: string,
+  data: string | object,
+  from: string,
+  callerPubKey: Uint8Array,
+  opts: DdbSignOptions = {},
+): DdbPreparedOp {
+  const compact = typeof data === 'string' ? JSON.stringify(JSON.parse(data)) : JSON.stringify(data);
+  const dataBytes = new TextEncoder().encode(compact);
+  const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000);
+  const gasLimit = opts.gasLimit ?? 100000;
+  const nonce = opts.nonce ?? ddbRandomNonce();
+  const typeByte = DDB_OP_TYPE[typeName];
+
+  return {
+    hash: canonicalDdbOperationHash(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce),
+    requestId: '0x' + ddbBytesToHex(
+      canonicalDdbRequestId(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce, from),
+    ),
+    envelope: {
+      type: typeName,
+      schemaName,
+      data: '0x' + ddbBytesToHex(dataBytes),
+      from,
+      timestamp: '0x' + timestamp.toString(16),
+      gasLimit: '0x' + gasLimit.toString(16),
+      nonce: '0x' + nonce.toString(16),
+      callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
+    },
+  };
+}
+
 /**
  * DDB (Decentralized DataBase) client — wraps the node's `ddb_*` JSON-RPC namespace so apps can
  * create contract schemas, call stored procedures, manage roles, and read rows from NCOG's on-chain
@@ -340,50 +462,42 @@ export class Ddb {
    * its true signer. `data` is compacted to its canonical bytes before signing.
    */
   private async signAndSubmit(
-    privateKey: string,
+    signerLike: DdbSignerLike,
     typeName: DdbOpTypeName,
     schemaName: string,
     data: string | object,
     opts: DdbSignOptions = {},
   ): Promise<string> {
-    // Data must be COMPACT JSON — the exact bytes the caller signs and the node hashes. JSON.stringify
-    // emits compact output (no insignificant whitespace), which is all the node's compact-check needs;
-    // the node hashes these exact bytes, so no cross-language canonicalization is required.
-    const compact = typeof data === 'string' ? JSON.stringify(JSON.parse(data)) : JSON.stringify(data);
-    const dataBytes = new TextEncoder().encode(compact);
-    const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000);
-    const gasLimit = opts.gasLimit ?? 100000;
-    // Fresh per submission. The node cannot supply this — it is inside the hash the caller signs — so
-    // an SDK that does not send one leaves every operation replayable with the caller's own signature.
-    const nonce = opts.nonce ?? ddbRandomNonce();
+    const signer = toDdbSigner(signerLike);
+    const from = await signer.getAddress();
+    const pub = await signer.getPublicKey();
 
-    const mldsa = await ddbGetMldsa();
-    const sk = ddbHexToBytes(privateKey);
-    const pub: Uint8Array = mldsa.derivePublicKey(sk);
-    const from = '0x' + ddbBytesToHex(keccak_256(pub).slice(-20));
+    // buildDdbOp does the compaction, the timestamp/gasLimit defaults and the fresh nonce, so the
+    // raw-key path and the wallet path cannot drift: both submit bytes produced by the same function.
+    const prepared = buildDdbOp(typeName, schemaName, data, from, pub, opts);
 
-    const hash = canonicalDdbOperationHash(DDB_OP_TYPE[typeName], schemaName, dataBytes, from, timestamp, gasLimit, nonce);
-    const sig: Uint8Array = mldsa.sign(sk, hash);
+    // The signer receives the canonical operation hash AS-IS. It must not be re-hashed or wrapped in
+    // the EIP-191 personal-message prefix on the way through a wallet.
+    const sig = await signer.signDdbHash(prepared.hash);
 
-    const signed = {
-      type: typeName,
-      schemaName,
-      data: '0x' + ddbBytesToHex(dataBytes),
-      from,
-      timestamp: '0x' + timestamp.toString(16),
-      gasLimit: '0x' + gasLimit.toString(16),
-      nonce: '0x' + nonce.toString(16),
-      callerPubKey: '0x' + ddbBytesToHex(pub),
-      callerSig: '0x' + ddbBytesToHex(sig),
-    };
-    await this.call('ddb_submitSignedOp', [signed]);
-    // Return the endorsement REQUEST ID (keccak256(canonicalBytes || requester)) — the key that tracks the
+    await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) }]);
+
+    // The endorsement REQUEST ID (keccak256(canonicalBytes || requester)) — the key that tracks the
     // write's lifecycle (endorsement quorum -> block finality -> async durable Postgres apply) via
     // getEndorsementStatus / waitForEndorsement. It is NOT a committed EVM tx hash: DDB commit txs are
     // authored by the leader, so a caller cannot know one up-front; the requestId is the stable handle.
-    return '0x' + ddbBytesToHex(
-      canonicalDdbRequestId(DDB_OP_TYPE[typeName], schemaName, dataBytes, from, timestamp, gasLimit, nonce, from),
-    );
+    return prepared.requestId;
+  }
+
+  /**
+   * Submit an operation you signed elsewhere. Pair with {@link buildDdbOp} when the key lives outside
+   * the SDK: build, ship `hash` to the signer, come back with the signature, submit here. Returns the
+   * endorsement requestId from the prepared op.
+   */
+  async submitSignedOp(prepared: DdbPreparedOp, signature: Uint8Array | string): Promise<string> {
+    const sig = typeof signature === 'string' ? signature : '0x' + ddbBytesToHex(signature);
+    await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: sig }]);
+    return prepared.requestId;
   }
 
   /**
@@ -418,12 +532,12 @@ export class Ddb {
    * first: any MALFORMED point_write (which the node would reject at endorsement) throws before submission.
    * Returns the endorsement requestId (track with waitForEndorsement).
    */
-  createSchemaSigned(privateKey: string, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
+  createSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
     if (typeof definition !== 'string') {
       const { errors } = validateContractDefinition(definition);
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
     }
-    return this.signAndSubmit(privateKey, 'createschema', schemaName, definition, opts);
+    return this.signAndSubmit(signer, 'createschema', schemaName, definition, opts);
   }
 
   /**
@@ -438,27 +552,27 @@ export class Ddb {
    * `definition` is the FULL new contract definition, not a diff. A typed object is validated
    * client-side first, exactly as createSchemaSigned does. Returns the endorsement requestId.
    */
-  updateSchemaSigned(privateKey: string, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
+  updateSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
     if (typeof definition !== 'string') {
       const { errors } = validateContractDefinition(definition);
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
     }
-    return this.signAndSubmit(privateKey, 'updateschema', schemaName, definition, opts);
+    return this.signAndSubmit(signer, 'updateschema', schemaName, definition, opts);
   }
 
   /** Call a stored procedure, signed by the caller. `schemaName` is the derived db_name (Ddb.deriveDbName). */
-  callProcedureSigned(privateKey: string, schemaName: string, procedure: string, args: string[] = [], opts?: DdbSignOptions): Promise<string> {
-    return this.signAndSubmit(privateKey, 'callprocedure', schemaName, { procedure, args }, opts);
+  callProcedureSigned(signer: DdbSignerLike, schemaName: string, procedure: string, args: string[] = [], opts?: DdbSignOptions): Promise<string> {
+    return this.signAndSubmit(signer, 'callprocedure', schemaName, { procedure, args }, opts);
   }
 
   /** Grant a role (admin-gated), signed by the caller. `schemaName` is the derived db_name. */
-  grantRoleSigned(privateKey: string, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string> {
-    return this.signAndSubmit(privateKey, 'grantrole', schemaName, { role, account }, opts);
+  grantRoleSigned(signer: DdbSignerLike, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string> {
+    return this.signAndSubmit(signer, 'grantrole', schemaName, { role, account }, opts);
   }
 
   /** Revoke a role (admin-gated), signed by the caller. `schemaName` is the derived db_name. */
-  revokeRoleSigned(privateKey: string, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string> {
-    return this.signAndSubmit(privateKey, 'revokerole', schemaName, { role, account }, opts);
+  revokeRoleSigned(signer: DdbSignerLike, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string> {
+    return this.signAndSubmit(signer, 'revokerole', schemaName, { role, account }, opts);
   }
 
   // ---------------------------------------------------------------------------
