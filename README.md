@@ -292,7 +292,7 @@ async function ddbExample(privateKeyHex, contractDefinition, contractAddress) {
   await ddb.waitForEndorsement(requestId);
   
   // Reads hit the node's Postgres directly (no consensus). Use the derived db_name.
-  const dbName = Ddb.deriveDbName('users', contractAddress);
+  const dbName = Ddb.deriveDbName(contractAddress);
   const rows = await ddb.select(dbName, 'accounts', { limit: 50 });
   console.log(rows);
 }

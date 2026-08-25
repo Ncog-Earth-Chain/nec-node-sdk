@@ -54,7 +54,7 @@ This document provides an overview of the main modules, classes, and features of
 - **Track a write**: `waitForEndorsement(requestId, opts?)`, `getEndorsementStatus(requestId)`.
 - **Reads** (this node's Postgres; no consensus): `getSchema(schemaName)`, `select(schemaName, tableName, opts?)`, `query(schemaName, tableName, limit?)`.
 - **Status / introspection**: `getValidators()`, `getConsensusStats()`, `getStats()`, `getStateAcc(schemaName)`, `shadowStatus()`.
-- **Helper**: static `Ddb.deriveDbName(contractName, contractAddress)` — the derived `db_name` every schema-scoped method (except `createSchema*`) expects.
+- **Helper**: static `Ddb.deriveDbName(contractAddress)` — the derived `db_name` every schema-scoped method (except `createSchema*`) expects.
 - Deprecated server-signed variants (`createSchema` / `callProcedure` / `grantRole` / `revokeRole`) exist but require the node to run with `NEC_DDB_ALLOW_LOCAL_SIGN=1` and fail closed on a production node.
 - Also exported: `canonicalDdbOperationHash`, `canonicalDdbRequestId` (advanced manual signing), and the DDB types (`DdbFilter`, `DdbQueryOptions`, `DdbRow`, `DdbSchemaInfo`, `DdbEndorsementStatus`, `DdbConsensusStats`, `DdbValidatorSet`, `DdbStorageStats`, etc.).
 

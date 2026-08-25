@@ -114,7 +114,7 @@ async function main(): Promise<void> {
 
   // 5. Read the applied schema back. Every schema-scoped read/call uses the DERIVED db_name,
   //    NOT the raw contract name.
-  const dbName = Ddb.deriveDbName('balances', CONTRACT_ADDRESS); // 'balances_abcdef'
+  const dbName = Ddb.deriveDbName(CONTRACT_ADDRESS); // 'c_' + the 40-hex address
   const schema = await ddb.getSchema(dbName);
   console.log('applied schema for', dbName, ':', JSON.stringify(schema, null, 2));
 }

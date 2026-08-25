@@ -35,10 +35,10 @@ Use the `*Signed` methods:
 
 | Method | Purpose |
 | --- | --- |
-| `createSchemaSigned(privateKey, contractName, definition, opts?)` | Deploy a contract schema |
-| `callProcedureSigned(privateKey, dbName, procedure, args?, opts?)` | Invoke a stored procedure |
-| `grantRoleSigned(privateKey, dbName, role, account, opts?)` | Grant a role (admin-gated) |
-| `revokeRoleSigned(privateKey, dbName, role, account, opts?)` | Revoke a role (admin-gated) |
+| `createSchemaSigned(signer, contractName, definition, opts?)` | Deploy a contract schema |
+| `callProcedureSigned(signer, dbName, procedure, args?, opts?)` | Invoke a stored procedure |
+| `grantRoleSigned(signer, dbName, role, account, opts?)` | Grant a role (admin-gated) |
+| `revokeRoleSigned(signer, dbName, role, account, opts?)` | Revoke a role (admin-gated) |
 
 Each returns a **`requestId`** — a `0x`-prefixed 32-byte hex string equal to
 `keccak256(canonicalBytes ‖ requester)`. This is the endorsement request id, **not** a committed EVM
@@ -85,11 +85,11 @@ This is the single most common source of confusion:
 - **`createSchemaSigned` takes the raw CONTRACT NAME** (e.g. `'balances'`). The node derives the
   underlying `db_name` from the definition's `contract_name` + `contract_address`.
 - **Every other schema-scoped method takes the DERIVED `db_name`** — compute it with
-  `Ddb.deriveDbName(contractName, contractAddress)`.
+  `Ddb.deriveDbName(contractAddress)`.
 
 ```typescript
-Ddb.deriveDbName('balances', '0x0000000000000000000000000000000000abcdef');
-// => 'balances_abcdef'   (lowercase(contractName + '_' + last 6 chars of address))
+Ddb.deriveDbName('0x0000000000000000000000000000000000abcdef');
+// 'c_0000000000000000000000000000000000abcdef'
 ```
 
 Methods that take the derived `db_name`: `callProcedureSigned`, `grantRoleSigned`,
@@ -108,37 +108,55 @@ const ddb = new Ddb(provider);
 
 `new Ddb(provider: Provider)` — wraps a `Provider` and exposes the `ddb_*` namespace.
 
-### `static deriveDbName(contractName, contractAddress)`
+### `static deriveDbName(contractAddress)`
 
-- **Signature:** `Ddb.deriveDbName(contractName: string, contractAddress: string): string`
-- **Returns:** `lowercase(contractName + '_' + contractAddress.slice(-6))`.
+- **Signature:** `Ddb.deriveDbName(contractAddress: string): string`
+- **Returns:** `'c_' + the address, lowercased, without `0x`` (the node's ddbschema.DeriveDbName).
+- **Throws:** on an empty or non-hex address, rather than deriving a schema that cannot exist.
 - **Use:** the `db_name` argument for every schema-scoped method except `createSchemaSigned`.
+
+### `updateSchemaSigned(signer, schemaName, definition, opts?)`
+
+- **Signature:** `updateSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string>`
+- **Op type:** `updateschema` (`inter.DdbUpdateSchema` = 1).
+- **`schemaName`:** the DERIVED `db_name` (`Ddb.deriveDbName(address)`), not the contract name — unlike
+  `createSchemaSigned`, this names a contract that already exists.
+- **`definition`:** the FULL new contract definition, not a diff. A typed object is validated
+  client-side first and throws synchronously on a malformed `point_write`.
+- **Additive only.** The node accepts a new column, table, procedure or role and refuses dropping a
+  column, changing a type or constraint, and dropping a table or procedure. Role assignments carry
+  forward to the new version.
+- **Returns:** the endorsement `requestId` (track with `waitForEndorsement`).
+
+> Upgrade is the only way a deployed data contract ever changes: schema evolution is strictly
+> additive and `DdbDeleteSchema` is refused by the node. Design contracts as permanent.
 
 ### Writes — client-signed (production path)
 
-#### `createSchemaSigned(privateKey, contractName, definition, opts?)`
+#### `createSchemaSigned(signer, contractName, definition, opts?)`
 
-- **Signature:** `createSchemaSigned(privateKey: string, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string>`
+- **Signature:** `createSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string>`
 - **Params:**
-  - `privateKey` — the caller's `0x`-hex ML-DSA-87 private key.
+  - `signer` — a raw `0x`-hex ML-DSA-87 private key (scripts, CI), or a `DdbSigner` (wallets and
+    hardware devices; see below).
   - `schemaName` — the raw **contract name**.
   - `definition` — a raw JSON string **or** a typed `ContractDefinition`.
-  - `opts?` — `DdbSignOptions` (`timestamp`, `gasLimit`).
+  - `opts?` — `DdbSignOptions` (`timestamp`, `gasLimit`, `nonce`).
 - **Returns:** the endorsement `requestId` (`0x`-hex string).
 - **Notes:** when `definition` is a typed object, `validateContractDefinition` runs client-side first
   and this method **throws** if `errors` is non-empty (a malformed `point_write` the node would
   reject at endorsement). A raw JSON string is submitted as-is (not pre-validated).
 
-#### `callProcedureSigned(privateKey, dbName, procedure, args?, opts?)`
+#### `callProcedureSigned(signer, dbName, procedure, args?, opts?)`
 
-- **Signature:** `callProcedureSigned(privateKey: string, schemaName: string, procedure: string, args?: string[], opts?: DdbSignOptions): Promise<string>`
+- **Signature:** `callProcedureSigned(signer: DdbSignerLike, schemaName: string, procedure: string, args?: string[], opts?: DdbSignOptions): Promise<string>`
 - **Params:** `dbName` is the derived `db_name`; `procedure` is the procedure name; `args` is an
   array of **string** arguments (defaults to `[]`).
 - **Returns:** the endorsement `requestId`.
 
-#### `grantRoleSigned(privateKey, dbName, role, account, opts?)` / `revokeRoleSigned(...)`
+#### `grantRoleSigned(signer, dbName, role, account, opts?)` / `revokeRoleSigned(...)`
 
-- **Signature:** `grantRoleSigned(privateKey: string, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string>`
+- **Signature:** `grantRoleSigned(signer: DdbSignerLike, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string>`
 - **Params:** `dbName` is the derived `db_name`; `role` is the role name; `account` is the target
   address. Admin-gated on the node.
 - **Returns:** the endorsement `requestId`.
@@ -213,8 +231,9 @@ interface DdbQueryOptions {
 }
 
 interface DdbSignOptions {
-  timestamp?: number; // unix seconds; defaults to now
-  gasLimit?: number;  // defaults to 100000
+  timestamp?: number;        // unix seconds; defaults to now
+  gasLimit?: number;         // defaults to 100000
+  nonce?: number | bigint;   // defaults to 8 cryptographically random bytes
 }
 
 type DdbRow = Record<string, unknown>;
@@ -253,7 +272,7 @@ interface DdbStorageStats {
 }
 ```
 
-> `DdbSignOptions.timestamp` and `.gasLimit` are both part of the signed canonical hash — the node
+> `DdbSignOptions.timestamp`, `.gasLimit` and `.nonce` are all part of the signed canonical hash — the node
 > uses exactly these values. Override them only for deterministic tests, not in normal use.
 
 ---
@@ -510,12 +529,58 @@ const brokenReport = validateContractDefinition(broken);
 // brokenReport.errors   === [
 //   'procedure "setBalance" point_write body uses a non-point predicate — a point op must match exactly one row by primary-key equality'
 // ]
-// => createSchemaSigned(privateKey, 'balances', broken) THROWS before submitting.
+// => createSchemaSigned(signer, 'balances', broken) THROWS before submitting.
 ```
 
 ---
 
-## 6. Advanced: manual canonical hashing
+## 6. Signing without handing over the key
+
+Every `*Signed` method takes a `DdbSignerLike`: either a raw private key, or a `DdbSigner`.
+
+```typescript
+interface DdbSigner {
+  getAddress(): string | Promise<string>;          // keccak256(rawMLDSAPubKey)[12:]
+  getPublicKey(): Uint8Array | Promise<Uint8Array>; // raw ML-DSA-87 public key
+  signDdbHash(hash: Uint8Array): Uint8Array | Promise<Uint8Array>; // sign the 32 bytes AS GIVEN
+}
+```
+
+The raw-key form stays supported and is right for scripts and CI. It is wrong for a wallet: an
+extension, a mobile wallet or a hardware device holds the key precisely so that nothing else sees it.
+
+Three things the implementation must get right, each of which the node checks:
+
+- **The address is the ML-DSA one.** `keccak256(rawMLDSAPublicKey)[12:]`, matching
+  `cryptod.PubkeyToAddress`. It is **not** the ML-KEM-derived data-wallet address; the node compares
+  `op.From` against the public key you send and rejects a mismatch.
+- **`signDdbHash` signs its argument as-is.** It is already the canonical operation hash. Do **not**
+  apply the EIP-191 personal-message prefix — reusing a `personal_sign` code path here signs the wrong
+  digest and the operation is rejected.
+- **Stamp `opts.timestamp` at approval, not at request.** Endorsement refuses an operation older than
+  15 minutes or more than 5 minutes in the future, and an approval sheet can sit open longer than that.
+
+### Signing across a process boundary
+
+When the signature has to be produced somewhere the SDK cannot call into, build and submit separately:
+
+```typescript
+import { buildDdbOp, Ddb } from '@ncog/necjs';
+
+const prepared = buildDdbOp('callprocedure', dbName, { procedure: 'addUser', args: ['alice'] },
+                            from, callerPubKey, { timestamp: Math.floor(Date.now() / 1000) });
+
+const signature = await device.sign(prepared.hash);   // 32 bytes out, signature back
+
+const requestId = await ddb.submitSignedOp(prepared, signature);
+await ddb.waitForEndorsement(requestId);
+```
+
+`prepared.envelope` is the complete `ddb_submitSignedOp` payload except `callerSig`, and
+`prepared.requestId` is the handle to poll — both fixed at build time, so the nonce and timestamp the
+signature covers are the ones that get submitted.
+
+## 7. Advanced: manual canonical hashing
 
 For callers that sign an operation manually (the `*Signed` methods do this for you), the SDK exports
 the exact canonical encoders the chain recomputes:
@@ -523,7 +588,10 @@ the exact canonical encoders the chain recomputes:
 ```typescript
 import { canonicalDdbOperationHash, canonicalDdbRequestId } from '@ncog/necjs';
 
-// keccak256("NEC-DDB-OP\x01" ‖ typeByte ‖ len(schemaName) ‖ len(data) ‖ from(20B) ‖ u64(ts) ‖ u64(gasLimit))
+// keccak256("NEC-DDB-OP\x01" ‖ typeByte ‖ len(schemaName) ‖ len(data) ‖ from(20B) ‖ u64(ts) ‖ u64(gasLimit) ‖ u64(nonce))
+//
+// The nonce is the LAST field. Omitting it, or moving it, produces a hash the chain does not
+// reproduce, and the operation is rejected with "caller signature verification failed".
 canonicalDdbOperationHash(
   typeByte: number,        // op-type tag: createschema=0, callprocedure=7, grantrole=8, revokerole=9
   schemaName: string,
@@ -531,6 +599,7 @@ canonicalDdbOperationHash(
   fromAddr: string,        // 20-byte hex
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,  // replay protection; MUST be fresh per submission
 ): Uint8Array;
 
 // keccak256(canonicalOperationBytes ‖ requester) — the requestId the *Signed methods return.
@@ -541,6 +610,7 @@ canonicalDdbRequestId(
   fromAddr: string,
   timestamp: number | bigint,
   gasLimit: number | bigint,
+  nonce: number | bigint,  // the SAME nonce you signed with
   requester: string,       // 20-byte hex
 ): Uint8Array;
 ```
@@ -549,7 +619,7 @@ Both are consensus-critical and pinned by a golden vector against the node's can
 
 ---
 
-## 7. End-to-end: deploy, track, read
+## 8. End-to-end: deploy, track, read
 
 ```typescript
 import { Provider, Ddb, type ContractDefinition } from '@ncog/necjs';
@@ -565,7 +635,7 @@ const deployReq = await ddb.createSchemaSigned(PRIVATE_KEY, 'balances', balances
 await ddb.waitForEndorsement(deployReq);
 
 // 2. Every later call uses the DERIVED db_name.
-const dbName = Ddb.deriveDbName('balances', CONTRACT_ADDRESS);      // 'balances_abcdef'
+const dbName = Ddb.deriveDbName(CONTRACT_ADDRESS);                  // 'c_<40 hex>'
 
 // 3. Call a point-op procedure (args are strings).
 const callReq = await ddb.callProcedureSigned(PRIVATE_KEY, dbName, 'upsertBalance', ['alice', '100']);

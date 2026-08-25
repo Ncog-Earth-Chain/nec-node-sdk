@@ -98,7 +98,7 @@ const { loadWasm, Provider, Wallet, Ddb } = require('@ncog/necjs');
   await ddb.waitForEndorsement(requestId); // wait until the write commits
 
   // READ (no consensus): derive the db_name for schema-scoped calls, then select rows.
-  const dbName = Ddb.deriveDbName('users', contractAddress); // e.g. 'users_abcdef'
+  const dbName = Ddb.deriveDbName(contractAddress); // e.g. 'c_0000...abcdef'
   const rows = await ddb.select(dbName, 'accounts', { limit: 50 });
   console.log('rows:', rows);
 })();

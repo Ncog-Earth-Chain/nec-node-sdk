@@ -24,10 +24,13 @@ describe('DDB signed-op submit envelope', () => {
     const provider: any = { send: (method: string, params: any[]) => { sent.push({ method, params }); return Promise.resolve('0xnode-op-hash'); } };
     const ddb = new Ddb(provider);
 
-    const schemaName = 'users_abcdef';
+    const schemaName = 'c_0000000000000000000000000000000000abcdef';
     const ts = 1000;
     const gas = 100000;
-    const requestId = await ddb.callProcedureSigned(skHex, schemaName, 'addUser', ['alice', '30'], { timestamp: ts, gasLimit: gas });
+    // An explicit nonce pins the envelope and the requestId. Production callers omit it and get fresh
+    // random bytes -- covered by the freshness test below, which is the property that actually matters.
+    const nonce = 0x2a;
+    const requestId = await ddb.callProcedureSigned(skHex, schemaName, 'addUser', ['alice', '30'], { timestamp: ts, gasLimit: gas, nonce });
 
     // one RPC, the signed-op submit
     expect(sent).toHaveLength(1);
@@ -40,6 +43,10 @@ describe('DDB signed-op submit envelope', () => {
     expect(env.from.toLowerCase()).toBe(GOLDEN_ADDRESS); // keccak256(rawPubkey)[12:]
     expect(env.timestamp).toBe('0x' + ts.toString(16));
     expect(env.gasLimit).toBe('0x' + gas.toString(16));
+    // The node CANNOT fill the nonce in -- it is inside the hash the caller signed -- so an envelope
+    // without it leaves the node reading 0 and every operation replayable with the caller's own
+    // signature. This assertion is the whole reason the field is on the wire.
+    expect(env.nonce).toBe('0x' + nonce.toString(16));
     expect(env.callerPubKey.toLowerCase()).toBe('0x' + Buffer.from(pub).toString('hex'));
     expect(typeof env.callerSig).toBe('string');
     expect(env.callerSig.startsWith('0x')).toBe(true);
@@ -51,14 +58,86 @@ describe('DDB signed-op submit envelope', () => {
 
     // return value is the endorsement requestId = keccak256(canonicalBytes || requester)
     const expected = '0x' + Buffer.from(
-      canonicalDdbRequestId(DDB_OP_CALLPROCEDURE, schemaName, dataBytes, GOLDEN_ADDRESS, ts, gas, GOLDEN_ADDRESS),
+      canonicalDdbRequestId(DDB_OP_CALLPROCEDURE, schemaName, dataBytes, GOLDEN_ADDRESS, ts, gas, nonce, GOLDEN_ADDRESS),
     ).toString('hex');
     expect(requestId).toBe(expected);
     expect(requestId).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it('deriveDbName lowercases contractName + last-6 of address', () => {
-    expect(Ddb.deriveDbName('Users', '0x0000000000000000000000000000000000ABCDEF')).toBe('users_abcdef');
+  it('uses a FRESH random nonce per submission when none is given', async () => {
+    const { skHex } = await deterministicKey();
+    const sent: any[] = [];
+    const provider: any = { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } };
+    const ddb = new Ddb(provider);
+    // Same operation, same timestamp: without a fresh nonce these two envelopes would be byte-identical,
+    // which is exactly what made a replay indistinguishable from the original.
+    await ddb.callProcedureSigned(skHex, 'c_0000000000000000000000000000000000abcdef', 'addUser', ['alice'], { timestamp: 1000 });
+    await ddb.callProcedureSigned(skHex, 'c_0000000000000000000000000000000000abcdef', 'addUser', ['alice'], { timestamp: 1000 });
+    expect(sent).toHaveLength(2);
+    expect(sent[0].nonce).not.toBe(sent[1].nonce);
+    expect(sent[0].nonce).toMatch(/^0x[0-9a-f]+$/);
+    // ...and because the nonce is signed, the signatures differ too.
+    expect(sent[0].callerSig).not.toBe(sent[1].callerSig);
+  });
+
+  // Mirrors the node's ddbschema.DeriveDbName: "c_" + the full address, lowercased, no 0x. The old
+  // contractName + last-6 form is gone from the node (commit 1345890) because a 6-hex suffix collides
+  // and the contract name is caller-supplied, so two contracts could be made to name one schema.
+  it('deriveDbName is "c_" + the full lowercased address', () => {
+    expect(Ddb.deriveDbName('0x0000000000000000000000000000000000ABCDEF'))
+      .toBe('c_0000000000000000000000000000000000abcdef');
+    expect(Ddb.deriveDbName('0000000000000000000000000000000000abcdef'))
+      .toBe('c_0000000000000000000000000000000000abcdef');
+  });
+
+  it('deriveDbName refuses an address that cannot name a schema', () => {
+    expect(() => Ddb.deriveDbName('')).toThrow(/invalid contract address/);
+    expect(() => Ddb.deriveDbName('0x')).toThrow(/invalid contract address/);
+    expect(() => Ddb.deriveDbName('0xnot-hex')).toThrow(/invalid contract address/);
+  });
+});
+
+describe('DDB contract upgrade (updateSchemaSigned)', () => {
+  // updateschema is op type 1 (inter.DdbUpdateSchema). It was absent from the SDK's op-type map, so
+  // there was no client-signed path to a contract upgrade at all -- and since schema evolution is
+  // additive-only and contracts cannot be deleted, upgrade is the only way a deployed contract changes.
+  it('submits op type "updateschema" with the full new definition', async () => {
+    const { skHex } = await deterministicKey();
+    const sent: any[] = [];
+    const provider: any = { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } };
+    const ddb = new Ddb(provider);
+
+    const schema = 'c_0000000000000000000000000000000000abcdef';
+    const def = { contract_address: '0x0000000000000000000000000000000000abcdef', contract_name: 'balances', version: '2' };
+    await ddb.updateSchemaSigned(skHex, schema, JSON.stringify(def), { timestamp: 1000, nonce: 7 });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].type).toBe('updateschema');
+    expect(sent[0].schemaName).toBe(schema);
+    const payload = Buffer.from(sent[0].data.slice(2), 'hex').toString('utf8');
+    expect(JSON.parse(payload)).toEqual(def);
+  });
+
+  it('validates a typed definition before submitting, like createSchemaSigned', async () => {
+    const { skHex } = await deterministicKey();
+    const provider: any = { send: () => Promise.reject(new Error('must not reach the node')) };
+    const ddb = new Ddb(provider);
+    const broken: any = {
+      contract_address: '0x0000000000000000000000000000000000abcdef',
+      contract_name: 'balances',
+      version: '2',
+      schema: { tables: [{ name: 'accounts', columns: [{ name: 'id', type: 'bigint', constraints: ['primary key'] }] }] },
+      procedures: [{
+        name: 'setBalance',
+        params: [{ name: 'uid', type: 'bigint' }],
+        body: 'UPDATE accounts SET v = 1 WHERE id > $uid',
+        point_write: { table: 'accounts', op: 'update', pk: [{ column: 'id', param: 'uid' }] },
+      }],
+    };
+    // Throws SYNCHRONOUSLY, before any promise exists -- same as createSchemaSigned. Worth knowing if
+    // you were planning to catch it with .catch(): there is nothing to attach to.
+    expect(() => ddb.updateSchemaSigned(skHex, 'c_0000000000000000000000000000000000abcdef', broken))
+      .toThrow(/invalid contract definition/);
   });
 });
 
