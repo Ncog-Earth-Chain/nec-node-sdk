@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "feat/**"]
+  pull_request:
+
+# This repo had no CI at all. Its 12 suites and 110 tests passed and nothing ran them, so the only
+# thing standing between a broken build and npm was `prepublishOnly` -- which runs at publish time,
+# long after the mistake was made and merged.
+#
+# That is not hypothetical here. The DDB canonical preimage omitted the signed nonce, so every
+# client-signed operation this SDK produced was rejected on chain, and the golden test that should have
+# caught it pinned a constant computed from the SDK's own broken encoding. A gate would not have caught
+# that either -- but it will catch the next thing, and it makes the tests worth keeping correct.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      # Blocking: the type surface is the SDK's contract with every consumer. Four exported signatures
+      # changed in 3.0.0 (the nonce parameters, deriveDbName), and a compile error is exactly how a
+      # caller is supposed to find out.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx jest --ci
+
+      # Blocking: the published artifact is dist/, and nothing else here builds it. A test suite that
+      # passes against src/ while the bundle fails to build ships nothing useful.
+      - name: Build
+        run: npm run build
