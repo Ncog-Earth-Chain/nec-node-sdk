@@ -52,7 +52,7 @@ This document provides an overview of the main modules, classes, and features of
 - Client for NCOG's on-chain relational database (`ddb_*` RPC namespace). Constructor: `new Ddb(provider)`. See the full [DDB Function Reference](DDB_FUNCTION_REFERENCE.md).
 - **Signed writes** (caller signs client-side with their ML-DSA-87 key; each returns an endorsement `requestId`): `createSchemaSigned(privateKey, schemaName, definition, opts?)`, `callProcedureSigned(privateKey, schemaName, procedure, args?, opts?)`, `grantRoleSigned(privateKey, schemaName, role, account, opts?)`, `revokeRoleSigned(privateKey, schemaName, role, account, opts?)`.
 - **Track a write**: `waitForEndorsement(requestId, opts?)`, `getEndorsementStatus(requestId)`.
-- **Reads** (this node's Postgres; no consensus): `getSchema(schemaName)`, `select(schemaName, tableName, opts?)`, `query(schemaName, tableName, limit?)`.
+- **Reads** (this node's Postgres; no consensus): `getSchema(contractAddress)` — takes the ADDRESS, not the derived name — plus `select(dbName, tableName, opts?)` and `query(dbName, tableName, limit?)`, which take `Ddb.deriveDbName(address)`.
 - **Status / introspection**: `getValidators()`, `getConsensusStats()`, `getStats()`, `getStateAcc(schemaName)`, `shadowStatus()`.
 - **Helper**: static `Ddb.deriveDbName(contractAddress)` — the derived `db_name` every schema-scoped method (except `createSchema*`) expects.
 - Deprecated server-signed variants (`createSchema` / `callProcedure` / `grantRole` / `revokeRole`) exist but require the node to run with `NEC_DDB_ALLOW_LOCAL_SIGN=1` and fail closed on a production node.

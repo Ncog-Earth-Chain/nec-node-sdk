@@ -92,8 +92,12 @@ Ddb.deriveDbName('0x0000000000000000000000000000000000abcdef');
 // 'c_0000000000000000000000000000000000abcdef'
 ```
 
-Methods that take the derived `db_name`: `callProcedureSigned`, `grantRoleSigned`,
-`revokeRoleSigned`, `getSchema`, `select`, `query`, `getStateAcc`.
+Methods that take the derived `db_name`: `callProcedureSigned`, `updateSchemaSigned`,
+`grantRoleSigned`, `revokeRoleSigned`, `select`, `query`, `getStateAcc`.
+
+Methods that take something else: `createSchemaSigned` takes the raw **contract name** (the node
+derives `db_name` itself from `contract_address` in the definition), and `getSchema` takes the
+**contract address**.
 
 ---
 
@@ -182,10 +186,15 @@ default node, and warns once per process. Use the `*Signed` equivalents instead.
 
 ### Reads (this node's Postgres; no consensus)
 
-#### `getSchema(dbName)`
+#### `getSchema(contractAddress)`
 
-- **Signature:** `getSchema(schemaName: string): Promise<DdbSchemaInfo>`
-- **Returns:** the contract-schema descriptor(s) for the `db_name` (all contracts when name is `''`).
+- **Signature:** `getSchema(contractAddress: string): Promise<DdbSchemaInfo>`
+- **Takes the CONTRACT ADDRESS, not the derived `db_name`** — the one read method that does. The node
+  resolves it with `SELECT ... FROM contracts WHERE contract_address = $1` and has no `db_name` branch,
+  so a derived `c_<40 hex>` name matches nothing and you get
+  `schema not found for contract address: c_...`. (The RPC parameter is *named* `schemaName` on the
+  wire, which is what makes this easy to get wrong.)
+- **Returns:** the contract-schema descriptor(s) for that address (all contracts when the value is `''`).
 
 #### `select(dbName, tableName, opts?)`
 

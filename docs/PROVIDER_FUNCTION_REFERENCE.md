@@ -195,7 +195,8 @@ hex-encode numeric fields. (The `Ddb` client uses `send` internally.)
 
 **Example:**
 ```typescript
-const schema = await provider.send('ddb_getSchema', ['c_0000000000000000000000000000000000abcdef']);
+// ddb_getSchema keys on contract_address, NOT the derived c_<40 hex> db_name.
+const schema = await provider.send('ddb_getSchema', ['0x0000000000000000000000000000000000abcdef']);
 ```
 
 ## Web3 Methods

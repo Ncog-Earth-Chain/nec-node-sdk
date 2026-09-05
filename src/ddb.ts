@@ -45,7 +45,7 @@ export interface DdbSignOptions {
 /** A single DDB table row — column name -> JSON-decoded value. */
 export type DdbRow = Record<string, unknown>;
 
-/** ddb_getSchema result — the contract-schema descriptor(s) for a db_name (all contracts when name is ''). */
+/** ddb_getSchema result — the contract-schema descriptor(s) for a CONTRACT ADDRESS (all contracts when it is ''). */
 export interface DdbSchemaInfo {
   contracts?: Array<Record<string, unknown>>;
   [k: string]: unknown;
@@ -402,16 +402,23 @@ export function buildDdbOp(
  *
  * READ semantics: getSchema / select / query hit the node's own Postgres directly and require no consensus.
  *
- * SCHEMA NAMING: createSchema* takes the CONTRACT NAME — the node derives the underlying db_name from
- * the definition's contract_name + contract_address. EVERY OTHER schema-scoped method takes the
- * DERIVED db_name = `Ddb.deriveDbName(contractAddress)`.
+ * SCHEMA NAMING, three cases — the node is not uniform here, so read this before wiring anything up:
+ *   - createSchema* takes the CONTRACT NAME. The node derives db_name itself, from the
+ *     contract_address inside the definition (ddbschema.DeriveDbName).
+ *   - getSchema takes the CONTRACT ADDRESS. Its RPC parameter is *named* schemaName, but the query
+ *     behind it is `WHERE contract_address = $1`, with no db_name branch.
+ *   - EVERY OTHER schema-scoped method takes the contract's db_name. PREFER
+ *     `await ddb.resolveDbName(contractAddress)`, which asks the chain and falls back to
+ *     derivation: a node on an OLDER binary still uses the retired `contractName_last6` scheme,
+ *     and against it every derived name is absent, so every call fails. Derivation alone:
+ *     updateSchema*, callProcedure*, grantRole*, revokeRole*, select, query, getStateAcc.
  *
  * @example
  *   const provider = new Provider('https://rpc.ncog.earth');
  *   const ddb = new Ddb(provider);
  *   // Deploy: the caller signs with their ML-DSA private key; the node derives `from` from that key.
  *   const txHash = await ddb.createSchemaSigned(myPrivKeyHex, 'users', schemaJson);
- *   const schema = Ddb.deriveDbName(contractAddress); // 'c_<40 hex>'
+ *   const schema = Ddb.deriveDbName(contractAddress); // 'c_<40 hex>' — for select/query/callProcedure
  *   // ...after the create tx finalizes...
  *   const rows = await ddb.select(schema, 'accounts', { limit: 50 });
  *   const callTx = await ddb.callProcedureSigned(myPrivKeyHex, schema, 'addUser', ['alice', '30']);
@@ -608,9 +615,54 @@ export class Ddb {
   // reads (this node's Postgres; no consensus)
   // ---------------------------------------------------------------------------
 
-  /** Fetch a schema's definition. `schemaName` is the derived db_name (Ddb.deriveDbName). */
-  getSchema(schemaName: string): Promise<DdbSchemaInfo> {
-    return this.call('ddb_getSchema', [schemaName]);
+  /**
+   * Fetch a contract's definition (tables, columns, indexes, procedures, roles).
+   *
+   * Takes the CONTRACT ADDRESS, not the derived db_name — the one read method that does. The node's
+   * `ddb_getSchema` resolves through `SELECT ... FROM contracts WHERE contract_address = $1`
+   * (gossip/ddb/postgres_storage.go QueryContractSchema); there is no db_name branch, so a derived
+   * `c_<40 hex>` name matches zero rows and the node answers "schema not found for contract address:
+   * c_...". Its parameter is *named* schemaName on the wire, which is what made this easy to get wrong.
+   *
+   * Pass the address here and `Ddb.deriveDbName(address)` to select / query / getStateAcc.
+   */
+  getSchema(contractAddress: string): Promise<DdbSchemaInfo> {
+    return this.call('ddb_getSchema', [contractAddress]);
+  }
+
+  /**
+   * Resolve the AUTHORITATIVE schema name for a contract by asking the chain, falling back to
+   * `Ddb.deriveDbName` only when the node does not report one.
+   *
+   * PREFER THIS OVER `deriveDbName` for every schema-scoped call. Derivation is correct only for a
+   * node built after the "derive the contract schema from the full address" change; a node running
+   * an older binary still names its schemas with the retired `contractName_last6` scheme, and its
+   * Postgres really does contain e.g. `userregistry_006a66`. Against such a node every derived
+   * `c_<40 hex>` name is simply absent, so `select`/`query`/`callProcedure` fail on every call --
+   * which is exactly how this SDK was source-correct and production-incompatible at the same time.
+   *
+   * The node reports the real name in `ddb_getSchema(...).contracts[].db_name`, so one round trip
+   * removes the guess. On a current node the two agree, making this strictly safer, never worse.
+   *
+   * The fallback is deliberate and NOT a silent failure: if the lookup errors (contract absent, node
+   * unreachable, an older RPC that omits the field) the derived name is the best available guess and
+   * is what the caller would have used anyway.
+   */
+  async resolveDbName(contractAddress: string): Promise<string> {
+    try {
+      const info = await this.getSchema(contractAddress);
+      const rows = Array.isArray(info?.contracts) ? info.contracts : [];
+      for (const row of rows) {
+        const rec = row as Record<string, unknown>;
+        const reported = rec?.db_name ?? rec?.dbName;
+        if (typeof reported === 'string' && reported.length > 0) {
+          return reported;
+        }
+      }
+    } catch {
+      // fall through to derivation -- see the note above
+    }
+    return Ddb.deriveDbName(contractAddress);
   }
 
   /** Select rows with optional filters / ordering / pagination. `schemaName` = derived db_name (Ddb.deriveDbName). */

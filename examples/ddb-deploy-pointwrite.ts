@@ -112,10 +112,10 @@ async function main(): Promise<void> {
   const status = await ddb.waitForEndorsement(requestId, { timeoutMs: 90_000 });
   console.log('deploy status:', status.status);
 
-  // 5. Read the applied schema back. Every schema-scoped read/call uses the DERIVED db_name,
-  //    NOT the raw contract name.
+  // 5. Read the applied schema back. NOTE the split: getSchema keys on contract_address, while the
+  //    row-level reads (select / query) key on the DERIVED db_name.
   const dbName = Ddb.deriveDbName(CONTRACT_ADDRESS); // 'c_' + the 40-hex address
-  const schema = await ddb.getSchema(dbName);
+  const schema = await ddb.getSchema(CONTRACT_ADDRESS);
   console.log('applied schema for', dbName, ':', JSON.stringify(schema, null, 2));
 }
 
