@@ -104,11 +104,30 @@ const IDE_MODULE = path.resolve(
   '../../ncog-trimix-ide/apps/remix-ide/src/app/plugins/contract-generator/ddbSchemaName.ts',
 );
 // Skipped outside the monorepo (a standalone SDK checkout has no IDE), never silently passed.
-const describeIde = fs.existsSync(IDE_MODULE) ? describe : describe.skip;
+const HAVE_IDE = fs.existsSync(IDE_MODULE);
+const describeIde = HAVE_IDE ? describe : describe.skip;
 
+// THE REQUIRE MUST STAY LAZY. `describe.skip` still EXECUTES its callback -- that is how it learns
+// which tests to mark skipped -- so a `require` of the sibling repo at describe-body level runs even
+// when the guard above said not to, throws during collection, and takes THE WHOLE FILE down: all
+// 35 tests in it, including the 13 live-schema deriveDbName cases above that need nothing but
+// ../src/ddb. Measured on a clone of this repo with no siblings next to it, which is exactly what
+// actions/checkout@v4 gives a runner:
+//
+//   FAIL tests/ddb-schema-name.test.ts
+//     Cannot find module '.../ncog-trimix-ide/.../ddbSchemaName.ts' from 'tests/ddb-schema-name.test.ts'
+//   Tests: 124 total   (159 in the monorepo)
+//
+// Loading it in beforeAll instead keeps the cross-check where it can run and lets the rest of the
+// file run where it cannot. On CI the 14 tests below report as SKIPPED, not passed -- the drift they
+// guard against is gated on the IDE's own CI instead (.github/workflows/ci.yml there runs the same
+// live fixture against its copy), because only that repo has both halves.
 describeIde('the Trimix IDE copy agrees with the SDK', () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ideDerive: (a: string) => string = require(IDE_MODULE).deriveDbName;
+  let ideDerive: (a: string) => string;
+  beforeAll(() => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    ideDerive = require(IDE_MODULE).deriveDbName;
+  });
 
   it.each(LIVE_CONTRACTS)('IDE derives $dbName for $address, same as the SDK', ({ address, dbName }) => {
     expect(ideDerive(address)).toBe(dbName);

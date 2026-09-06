@@ -36,8 +36,19 @@ describe('SigVersion v2 tx-signer', () => {
     expect(decoded.nonce).toBe('0');
     expect(String(decoded.to).toLowerCase()).toBe(('0x' + '22'.repeat(20)).toLowerCase());
 
-    // Emit the golden hex where the Go verifier reads it.
-    const outDir = path.resolve(__dirname, '../../ncog-evm/core/types');
+    // Emit the golden hex INSIDE THIS REPO. It used to be written straight into the sibling
+    // ../../ncog-evm/core/types/ with no guard, which did two wrong things at once:
+    //
+    //   1. on any checkout without that sibling -- i.e. every CI runner -- the write threw
+    //      `ENOENT ... open '.../ncog-evm/core/types/js_golden.hex'` and this suite FAILED;
+    //   2. in the monorepo it MUTATED a different repository on every single `npm test`.
+    //
+    // The Go side's producer was never this test anyway: core/types/js_golden_vector_test.go says
+    // "run nec-node-sdk golden-vector.ts first" and skips when the file is absent, and
+    // scripts/golden-vector.ts is the script that deliberately writes there. This test keeps its own
+    // copy under tests/testdata/ so the vector it just signed is still inspectable after a run.
+    const outDir = path.resolve(__dirname, 'testdata');
+    fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'js_golden.hex'), signed.raw.slice(2), 'utf8');
     // eslint-disable-next-line no-console
     console.log('sigv2 golden: address=%s hash=%s bytes=%d', address, signed.hash, (signed.raw.length - 2) / 2);

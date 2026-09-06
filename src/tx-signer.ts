@@ -211,11 +211,29 @@ export interface SignedTx {
 }
 
 // The scheme version emitted for a normal (unrotated) ML-DSA-87 signer. Matches types.SigVerMLDsaV2.
-const SIGVER_MLDSA_V2 = 2;
+export const SIGVER_MLDSA_V2 = 2;
+// The scheme version a ROTATED (or guardian-recovered) account must declare. Matches
+// types.SigVerRotated. Its signing key no longer hashes to the account address, so attribution goes
+// through the on-chain key registry: Sender() returns the claimed From, and execution's preCheck
+// (vm.EnforceKeyHash) proves keccak(pubkey) is that account's REGISTERED current key.
+export const SIGVER_ROTATED = 3;
 
 export interface SignOptions {
   // Optional: supply the public key to skip re-deriving it from the secret key.
   publicKeyHex?: string;
+  /**
+   * Claimed sender. Defaults to keccak256(rawPubkey)[12:], which is correct ONLY while the account
+   * has not rotated its key. After a rotation or a guardian recovery the account keeps its ORIGINAL
+   * address and the key no longer derives it (Model B) -- pass that stable address here, or every
+   * transaction is signed as a different, empty account.
+   */
+  from?: string;
+  /**
+   * Signature-scheme version. Defaults to 2, or to 3 when `from` is supplied and differs from the
+   * derived address. Note that SigVer is NOT an authorization input on the node: declaring 3 on an
+   * unrotated account still has to satisfy the legacy keccak binding, so this cannot be abused.
+   */
+  sigVer?: number;
 }
 
 /**
@@ -250,9 +268,24 @@ export async function signTransactionMLDSA87(
   const pubBytes: Uint8Array = options.publicKeyHex ? hexToBytes(options.publicKeyHex) : mldsa.derivePublicKey(sk);
   const pubKeyHex = bytesToHex(pubBytes);
 
-  // v2 sender + scheme version. from = keccak256(rawPubkey)[12:] (20 bytes); sigVer = 2.
-  const from = keccak_256(pubBytes).slice(12);
-  const sigVer = intToMinimalBytes(BigInt(SIGVER_MLDSA_V2)); // [0x02]
+  // v2 sender + scheme version. Default (unrotated): from = keccak256(rawPubkey)[12:], sigVer = 2.
+  // Rotated account (Model B): the caller supplies the account's STABLE address, and the version
+  // defaults to 3 because the key no longer derives that address.
+  const derivedFrom: Uint8Array = keccak_256(pubBytes).slice(12);
+  let from: Uint8Array = derivedFrom;
+  if (options.from !== undefined && options.from !== null && options.from !== '') {
+    from = hexToBytes(options.from);
+    if (from.length !== 20) {
+      throw new Error(`invalid "from" address length: ${from.length} (expected 20)`);
+    }
+  }
+  const derivedMatches = bytesToHex(from) === bytesToHex(derivedFrom);
+  const sigVerNum = options.sigVer ?? (derivedMatches ? SIGVER_MLDSA_V2 : SIGVER_ROTATED);
+  if (!Number.isInteger(sigVerNum) || sigVerNum < SIGVER_MLDSA_V2 || sigVerNum > 255) {
+    // The node's Sender() rejects anything below SigVerMLDsaV2 outright.
+    throw new Error(`invalid sigVer ${sigVerNum}: must be an integer >= ${SIGVER_MLDSA_V2}`);
+  }
+  const sigVer = intToMinimalBytes(BigInt(sigVerNum)); // [0x02] or [0x03]
 
   // 1. signing digest = keccak256(RLP([sigVer, from, nonce, gasPrice, gas, to, value, data, chainId])).
   //    SigVer + from LEAD (bound by the signature); chainId last. MUST match types.SigningHash.
@@ -276,6 +309,32 @@ export async function signTransactionMLDSA87(
     publicKey: '0x' + pubKeyHex,
     signature: '0x' + bytesToHex(sig),
   };
+}
+
+/**
+ * Sign a transaction for a ROTATED (or guardian-recovered) account.
+ *
+ * Model B keeps the ADDRESS and replaces the KEY, so after a rotation the signing key derives a
+ * DIFFERENT address than the account's. `accountAddress` must be the account's original, stable
+ * address -- the one that holds the balance. Signing such an account with plain
+ * `signTransactionMLDSA87` produces a transaction from an unrelated empty address, which is how a
+ * client silently destroys an account it thought it had rotated.
+ *
+ * The node accepts this only if the registry says so: preCheck runs vm.EnforceKeyHash, which
+ * requires keccak256(rawPubkey) === the account's registered currentKeyHash. Confirm the rotation
+ * landed (readKeyRegistry) before relying on this path.
+ */
+export function signRotatedTransactionMLDSA87(
+  txParams: any,
+  privateKeyHex: string,
+  accountAddress: string,
+  options: SignOptions = {},
+): Promise<SignedTx> {
+  return signTransactionMLDSA87(txParams, privateKeyHex, {
+    ...options,
+    from: accountAddress,
+    sigVer: options.sigVer ?? SIGVER_ROTATED,
+  });
 }
 
 /**

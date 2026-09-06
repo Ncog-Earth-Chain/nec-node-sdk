@@ -26,7 +26,12 @@ export interface DdbQueryOptions {
 // Options for the client-signed DDB write methods. Both fields are part of the signed
 // CanonicalOperationHash, so the node uses exactly these values — override only for determinism/tests.
 export interface DdbSignOptions {
-  timestamp?: number; // unix seconds; defaults to now
+  /**
+   * UNIX SECONDS, defaulting to now. Not milliseconds: the node refuses ts == 0 by name and
+   * anything outside [now-900, now+300] (gossip/ddb/authz.go), so a millisecond value is not a
+   * rounding error -- it is every operation refused, with no local symptom. buildDdbOp rejects one.
+   */
+  timestamp?: number;
   gasLimit?: number;  // defaults to 100000
   /**
    * Replay-protection nonce, part of the SIGNED preimage. Defaults to 8 cryptographically random
@@ -106,6 +111,15 @@ const DDB_OP_TYPE = {
   // NEC_DDB_ALLOW_LOCAL_SIGN=1. Schema evolution is strictly additive and a contract cannot be deleted,
   // so upgrade is the ONLY way a deployed data contract ever changes.
   updateschema: 1,
+  // deleteschema is inter.DdbDeleteSchema == 2. It is NOT an unimplemented type: the node has a full
+  // tombstone path for it -- an authorization rule (gossip/ddb/authz.go `case inter.DdbDeleteSchema`,
+  // owner-or-admin), an endorsement branch (endorsement_consensus.go, "contract deletion approved"),
+  // SQL (operation_sql.go -> ddbschema.GenerateTombstoneSQLByDbName) and a place in the block-validity
+  // allow-list (main_chain_consensus.go verifyOperationValidity). What it does NOT have is a
+  // convenience RPC: PublicDdbAPI has no DeleteSchema method at all, so ddb_submitSignedOp is the
+  // ONLY way to reach it from anywhere. Omitting it here therefore made retiring a contract
+  // unreachable from every client, exactly as omitting updateschema did for upgrades.
+  deleteschema: 2,
   callprocedure: 7,
   grantrole: 8,
   revokerole: 9,
@@ -138,9 +152,60 @@ function ddbConcat(...arrs: Uint8Array[]): Uint8Array {
   for (const a of arrs) { out.set(a, o); o += a.length; }
   return out;
 }
+const DDB_U64_MAX = (BigInt(1) << BigInt(64)) - BigInt(1);
+
+/**
+ * The largest value buildDdbOp will accept as a unix-SECONDS timestamp: 1e11, the year 5138.
+ *
+ * A magnitude check, deliberately NOT the node's freshness window. buildDdbOp is also used to build
+ * fixed vectors and capability probes — both wallets build one with `timestamp: 1` to ask whether the
+ * bundled SDK encodes the deleteschema type at all, and that probe reads a THROW as "no" — so a
+ * window check here would quietly turn an SDK upgrade into a wallet that refuses contract retirement
+ * forever. This catches the one mistake that has no local symptom (milliseconds, ~1.7e12 today, which
+ * every node refuses as ~53,000 years in the future) and leaves small deliberate values alone.
+ */
+const DDB_MAX_TIMESTAMP_SECONDS = BigInt(100000000000);
+
+/**
+ * Normalize one of the three numeric operation fields (timestamp, gasLimit, nonce) to the exact
+ * uint64 the chain will read, or throw.
+ *
+ * Every caller of this -- the hash preimage AND the JSON envelope -- goes through it, which is the
+ * point. The node reads the number twice: once as the 8 big-endian bytes inside the signed preimage,
+ * and once as the `0x…` hexutil.Uint64 in the envelope it re-hashes to check the signature. If those
+ * two ever describe different numbers, the wallet produces a perfectly valid ML-DSA-87 signature over
+ * a preimage the node cannot reproduce, and the only symptom is "caller signature verification
+ * failed" from a node that will not say which field disagreed. Deriving both from one validated
+ * bigint makes that divergence unrepresentable rather than merely unlikely.
+ *
+ * A non-integer used to reach both sides differently: the preimage truncated it and the envelope
+ * emitted `0x3e8.8`. A Number above 2^53 was silently rounded before it was ever encoded. Both are
+ * refused here, at the call site, where the caller can still see which value was wrong.
+ */
+function ddbU64(field: string, v: number | bigint): bigint {
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) throw new Error(`DDB ${field} must be a finite integer, got ${v}`);
+    if (!Number.isInteger(v)) throw new Error(`DDB ${field} must be a whole number, got ${v}`);
+    if (!Number.isSafeInteger(v)) {
+      throw new Error(
+        `DDB ${field} ${v} exceeds Number.MAX_SAFE_INTEGER and has already lost precision; pass a bigint`,
+      );
+    }
+  }
+  const x = BigInt(v);
+  if (x < BigInt(0)) throw new Error(`DDB ${field} must not be negative, got ${x}`);
+  if (x > DDB_U64_MAX) throw new Error(`DDB ${field} does not fit in a uint64: ${x}`);
+  return x;
+}
+
+/** The envelope form of a validated uint64: hexutil.Uint64, lowercase, no leading zeros. */
+function ddbU64Hex(x: bigint): string {
+  return '0x' + x.toString(16);
+}
+
 // big-endian uint64 (matches Go binary.BigEndian.PutUint64).
 function ddbU64BE(v: number | bigint): Uint8Array {
-  let x = typeof v === 'bigint' ? v : BigInt(Math.trunc(v));
+  let x = typeof v === 'bigint' ? v : ddbU64('value', v);
   const b = new Uint8Array(8);
   const mask = BigInt(0xff);
   const eight = BigInt(8);
@@ -187,19 +252,24 @@ function canonicalDdbOperationBytes(
   const enc = new TextEncoder();
   const fromBytes = ddbHexToBytes(fromAddr);
   if (fromBytes.length !== 20) throw new Error(`invalid from address length: ${fromBytes.length} (expected 20)`);
+  // Validated HERE as well as in buildDdbOp, because this function is exported: an advanced caller
+  // signing an operation by hand reaches the preimage without going through the envelope builder.
+  const ts = ddbU64('timestamp', timestamp);
+  const gas = ddbU64('gasLimit', gasLimit);
+  const nce = ddbU64('nonce', nonce);
   return ddbConcat(
     DDB_OP_DOMAIN, // already includes the 0x01 version byte
     Uint8Array.of(typeByte & 0xff),
     ddbLenPrefixed(enc.encode(schemaName)),
     ddbLenPrefixed(data),
     fromBytes,
-    ddbU64BE(timestamp),
-    ddbU64BE(gasLimit),
+    ddbU64BE(ts),
+    ddbU64BE(gas),
     // The nonce is the LAST field, immediately after gasLimit. This position is not a style choice:
     // the node appends it in exactly this place (gossip/ddb/canonical.go, `b = appendU64(b, op.Nonce)`)
     // and hashes the result, so a signer that omits it or moves it produces a hash the chain will not
     // reproduce and the operation is rejected with "caller signature verification failed".
-    ddbU64BE(nonce),
+    ddbU64BE(nce),
   );
 }
 
@@ -332,6 +402,50 @@ export interface DdbSignedOpEnvelope {
   callerSig: string;
 }
 
+/**
+ * What a submitted DDB operation gives you back.
+ *
+ * TWO handles, because they answer different questions and only one of them is terminal:
+ *
+ * - `requestId` tracks the ENDORSEMENT round (ddb_getEndorsementStatus). Its "completed" means a 2f+1
+ *   quorum signed, which happens BEFORE block validity. It is not proof the write landed.
+ * - `commitTxHash` is what ddb_submitSignedOp actually returns -- the leader's commit transaction --
+ *   and it is the only input ddb_getCommitStatus accepts. That RPC is the one that can say `skipped`
+ *   (state-chain break, lost row lock, unpayable gas) and why.
+ *
+ * The distinction is not academic. gossip/c_block_callbacks.go indexes tx positions only over the
+ * NON-skipped set, so a skipped commit tx returns null from eth_getTransactionByHash and
+ * eth_getTransactionReceipt forever -- identical to a tx that was never mined. Without the commit
+ * hash, "skipped" and "still pending" are the same answer, and the node's own comment records that
+ * this is how a revokeRole was once reported as succeeding while the account kept the role on every
+ * node. The SDK used to discard the RPC's return value, so no caller could ever ask.
+ */
+export interface DdbSubmitReceipt {
+  /** keccak256(canonicalOperationBytes || requester) — the endorsement handle. */
+  requestId: string;
+  /** The commit transaction hash the node returned. Feed it to getCommitStatus / waitForCommit. */
+  commitTxHash: string;
+}
+
+/** ddb_getCommitStatus result (mirrors PublicDdbAPI.GetCommitStatus). */
+export interface DdbCommitStatus {
+  txHash: string;
+  /**
+   * "applied"  — included at block validity; the write is authoritative on chain.
+   * "skipped"  — excluded on EVERY node; `reason` says why. The write did NOT happen.
+   * "unknown"  — this node has no verdict yet (not finalized, out of the retention window, or the
+   *              node restarted; the skip registry is in-memory and is not rebuilt at boot).
+   *              Deliberately NOT success.
+   */
+  status: 'applied' | 'skipped' | 'unknown' | (string & {});
+  blockNumber?: string;
+  reason?: string;
+  /** Whether THIS node's Postgres carries the ddb_applied_commits marker yet (apply is async). */
+  durable?: boolean;
+  durableBlockNumber?: string;
+  [k: string]: unknown;
+}
+
 /** An operation prepared for signing: what to sign, and the envelope it becomes. */
 export interface DdbPreparedOp {
   /** The 32 bytes to sign. Sign AS-IS -- no EIP-191 prefix. */
@@ -361,10 +475,28 @@ export function buildDdbOp(
 ): DdbPreparedOp {
   const compact = typeof data === 'string' ? JSON.stringify(JSON.parse(data)) : JSON.stringify(data);
   const dataBytes = new TextEncoder().encode(compact);
-  const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000);
-  const gasLimit = opts.gasLimit ?? 100000;
-  const nonce = opts.nonce ?? ddbRandomNonce();
+  // One validated bigint per field, used for BOTH the signed preimage and the envelope. See ddbU64:
+  // a hash and an envelope that describe different numbers is the failure this shape removes.
+  //
+  // The timestamp is UNIX SECONDS. This function owns that decision for every caller that does not
+  // pass one, and the unit is load-bearing rather than cosmetic: gossip/ddb/authz.go refuses ts == 0
+  // by name and anything outside [now - maxOperationAge(900s), now + maxOperationSkew(300s)]. A
+  // milliseconds value lands ~53,000 years past that ceiling, so EVERY operation is refused — with no
+  // local symptom at all, because the signature is valid and the envelope is well formed. Hence
+  // Date.now() / 1000, floored, and the magnitude check below.
+  const timestamp = ddbU64('timestamp', opts.timestamp ?? Math.floor(Date.now() / 1000));
+  if (timestamp > DDB_MAX_TIMESTAMP_SECONDS) {
+    throw new Error(
+      `DDB timestamp ${timestamp} is not unix seconds — it looks like milliseconds. The node refuses ` +
+      `any operation more than 300s ahead of its own clock (gossip/ddb/authz.go maxOperationSkew).`,
+    );
+  }
+  const gasLimit = ddbU64('gasLimit', opts.gasLimit ?? 100000);
+  const nonce = ddbU64('nonce', opts.nonce ?? ddbRandomNonce());
   const typeByte = DDB_OP_TYPE[typeName];
+  if (typeByte === undefined) {
+    throw new Error(`unknown DDB operation type ${JSON.stringify(typeName)}`);
+  }
 
   return {
     hash: canonicalDdbOperationHash(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce),
@@ -376,9 +508,9 @@ export function buildDdbOp(
       schemaName,
       data: '0x' + ddbBytesToHex(dataBytes),
       from,
-      timestamp: '0x' + timestamp.toString(16),
-      gasLimit: '0x' + gasLimit.toString(16),
-      nonce: '0x' + nonce.toString(16),
+      timestamp: ddbU64Hex(timestamp),
+      gasLimit: ddbU64Hex(gasLimit),
+      nonce: ddbU64Hex(nonce),
       callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
     },
   };
@@ -468,13 +600,33 @@ export class Ddb {
    * `from` is DERIVED from the key (address = keccak256(rawPubkey)[12:]), so the operation always names
    * its true signer. `data` is compacted to its canonical bytes before signing.
    */
+  /**
+   * Sign an operation with `signer` and submit it, returning BOTH handles: the endorsement requestId
+   * and the node's commit tx hash. This is the general entry point -- the five named convenience
+   * methods below are this function with a fixed type and payload shape, and they discard the commit
+   * hash for backwards compatibility.
+   *
+   * Prefer this in a wallet: the commit hash is the only handle ddb_getCommitStatus accepts, and it is
+   * the only way to distinguish "the write landed" from "the write was deterministically skipped on
+   * every node". See {@link DdbSubmitReceipt}.
+   */
+  async submitOperationSigned(
+    signer: DdbSignerLike,
+    typeName: DdbOpTypeName,
+    schemaName: string,
+    data: string | object,
+    opts: DdbSignOptions = {},
+  ): Promise<DdbSubmitReceipt> {
+    return this.signAndSubmit(signer, typeName, schemaName, data, opts);
+  }
+
   private async signAndSubmit(
     signerLike: DdbSignerLike,
     typeName: DdbOpTypeName,
     schemaName: string,
     data: string | object,
     opts: DdbSignOptions = {},
-  ): Promise<string> {
+  ): Promise<DdbSubmitReceipt> {
     const signer = toDdbSigner(signerLike);
     const from = await signer.getAddress();
     const pub = await signer.getPublicKey();
@@ -487,13 +639,14 @@ export class Ddb {
     // the EIP-191 personal-message prefix on the way through a wallet.
     const sig = await signer.signDdbHash(prepared.hash);
 
-    await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) }]);
+    const commitTxHash = await this.call(
+      'ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) }],
+    );
 
-    // The endorsement REQUEST ID (keccak256(canonicalBytes || requester)) — the key that tracks the
-    // write's lifecycle (endorsement quorum -> block finality -> async durable Postgres apply) via
-    // getEndorsementStatus / waitForEndorsement. It is NOT a committed EVM tx hash: DDB commit txs are
-    // authored by the leader, so a caller cannot know one up-front; the requestId is the stable handle.
-    return prepared.requestId;
+    // Both handles. ddb_submitSignedOp returns proof.CommitTxHash (ethapi/ddb_api.go); this used to be
+    // awaited and thrown away, which left ddb_getCommitStatus -- the ONLY RPC that can report a
+    // deterministic skip -- unreachable from any client, because its sole parameter is that hash.
+    return { requestId: prepared.requestId, commitTxHash: typeof commitTxHash === 'string' ? commitTxHash : '' };
   }
 
   /**
@@ -502,9 +655,17 @@ export class Ddb {
    * endorsement requestId from the prepared op.
    */
   async submitSignedOp(prepared: DdbPreparedOp, signature: Uint8Array | string): Promise<string> {
+    return (await this.submitSignedOpDetailed(prepared, signature)).requestId;
+  }
+
+  /**
+   * As {@link submitSignedOp}, but returns the commit tx hash alongside the requestId. Use this one
+   * unless you have a caller that depends on the bare-string return.
+   */
+  async submitSignedOpDetailed(prepared: DdbPreparedOp, signature: Uint8Array | string): Promise<DdbSubmitReceipt> {
     const sig = typeof signature === 'string' ? signature : '0x' + ddbBytesToHex(signature);
-    await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: sig }]);
-    return prepared.requestId;
+    const commitTxHash = await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: sig }]);
+    return { requestId: prepared.requestId, commitTxHash: typeof commitTxHash === 'string' ? commitTxHash : '' };
   }
 
   /**
@@ -544,7 +705,7 @@ export class Ddb {
       const { errors } = validateContractDefinition(definition);
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
     }
-    return this.signAndSubmit(signer, 'createschema', schemaName, definition, opts);
+    return this.signAndSubmit(signer, 'createschema', schemaName, definition, opts).then((r) => r.requestId);
   }
 
   /**
@@ -564,22 +725,42 @@ export class Ddb {
       const { errors } = validateContractDefinition(definition);
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
     }
-    return this.signAndSubmit(signer, 'updateschema', schemaName, definition, opts);
+    return this.signAndSubmit(signer, 'updateschema', schemaName, definition, opts).then((r) => r.requestId);
   }
 
   /** Call a stored procedure, signed by the caller. `schemaName` is the derived db_name (Ddb.deriveDbName). */
   callProcedureSigned(signer: DdbSignerLike, schemaName: string, procedure: string, args: string[] = [], opts?: DdbSignOptions): Promise<string> {
-    return this.signAndSubmit(signer, 'callprocedure', schemaName, { procedure, args }, opts);
+    return this.signAndSubmit(signer, 'callprocedure', schemaName, { procedure, args }, opts).then((r) => r.requestId);
+  }
+
+  /**
+   * RETIRE a deployed contract, signed by the caller. `schemaName` is the derived db_name.
+   *
+   * A TOMBSTONE, not a drop: the node keeps the per-contract schema and every row, marks two columns
+   * on the registry row, and from then on refuses reads and writes against it
+   * (ddbschema.GenerateTombstoneSQLByDbName). The on-chain registry row and the anchored state hash
+   * SURVIVE, which is what stops the address being re-claimed by someone else afterwards. Reversible
+   * by design -- a hard drop that reclaims disk is deliberately not implemented.
+   *
+   * Authorized for the contract's OWNER or any holder of its `admin` role, and refused outright if the
+   * contract is already retired. The node consults no payload for this operation, so `data` is a fixed
+   * empty object; the operation is identified entirely by its schema, type and signer.
+   *
+   * There is no ddb_deleteSchema convenience RPC on the node, so this signed path is the only way to
+   * reach the operation from outside a validator.
+   */
+  deleteSchemaSigned(signer: DdbSignerLike, schemaName: string, opts?: DdbSignOptions): Promise<string> {
+    return this.signAndSubmit(signer, 'deleteschema', schemaName, {}, opts).then((r) => r.requestId);
   }
 
   /** Grant a role (admin-gated), signed by the caller. `schemaName` is the derived db_name. */
   grantRoleSigned(signer: DdbSignerLike, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string> {
-    return this.signAndSubmit(signer, 'grantrole', schemaName, { role, account }, opts);
+    return this.signAndSubmit(signer, 'grantrole', schemaName, { role, account }, opts).then((r) => r.requestId);
   }
 
   /** Revoke a role (admin-gated), signed by the caller. `schemaName` is the derived db_name. */
   revokeRoleSigned(signer: DdbSignerLike, schemaName: string, role: string, account: string, opts?: DdbSignOptions): Promise<string> {
-    return this.signAndSubmit(signer, 'revokerole', schemaName, { role, account }, opts);
+    return this.signAndSubmit(signer, 'revokerole', schemaName, { role, account }, opts).then((r) => r.requestId);
   }
 
   // ---------------------------------------------------------------------------
@@ -687,6 +868,56 @@ export class Ddb {
   /** Endorsement status for a request id (the value returned by the *Signed write methods). */
   getEndorsementStatus(requestId: string): Promise<DdbEndorsementStatus> {
     return this.call('ddb_getEndorsementStatus', [requestId]);
+  }
+
+  /**
+   * The TERMINAL answer for a DDB write: did commit tx `txHash` APPLY, or was it deterministically
+   * SKIPPED at block validity, and why. Takes the `commitTxHash` from a {@link DdbSubmitReceipt}.
+   *
+   * Neither standard eth RPC can answer this. A skipped commit tx is never given a tx-position index,
+   * so eth_getTransactionByHash and eth_getTransactionReceipt both return null for it forever --
+   * exactly as they do for a tx that was never mined -- which makes "skipped" and "still pending"
+   * indistinguishable everywhere else.
+   *
+   * `status: "unknown"` is NOT success: it means this node has no verdict yet.
+   */
+  getCommitStatus(txHash: string): Promise<DdbCommitStatus> {
+    return this.call('ddb_getCommitStatus', [txHash]);
+  }
+
+  /**
+   * Poll getCommitStatus until the write is known to have APPLIED, and throw if the node reports it
+   * SKIPPED (with the node's own reason: state_chain_break, signed_prior_mismatch, row_lock_lost,
+   * unpayable_gas, already_applied, replay).
+   *
+   * This is the check that separates "the quorum endorsed it" from "it landed". waitForEndorsement
+   * answers the first question only, and resolving there is how a write that was skipped on every node
+   * gets reported to a user as done.
+   *
+   * `requireDurable` additionally waits for THIS node's Postgres to carry the applied marker (the data
+   * plane applies asynchronously, so applied-but-not-yet-durable is normal and transient).
+   */
+  async waitForCommit(
+    txHash: string,
+    opts: { intervalMs?: number; timeoutMs?: number; requireDurable?: boolean } = {},
+  ): Promise<DdbCommitStatus> {
+    const interval = opts.intervalMs ?? 1000;
+    const deadline = Date.now() + (opts.timeoutMs ?? 60000);
+    let last: DdbCommitStatus | undefined;
+    for (;;) {
+      last = await this.getCommitStatus(txHash);
+      const status = String(last?.status ?? '').toLowerCase();
+      if (status === 'skipped') {
+        throw new Error(
+          `DDB commit ${txHash} was SKIPPED on every node: ${last?.reason ?? 'no reason reported'} — the write did not happen`,
+        );
+      }
+      if (status === 'applied' && (!opts.requireDurable || last?.durable === true)) return last;
+      if (Date.now() >= deadline) {
+        throw new Error(`waitForCommit timed out for ${txHash} (last: ${JSON.stringify(last)})`);
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
   }
 
   /** Dual-consensus stats. */
