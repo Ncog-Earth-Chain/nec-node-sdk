@@ -5,37 +5,213 @@ on:
     branches: [main, master, "feat/**"]
   pull_request:
 
-# This repo had no CI at all. Its 12 suites and 110 tests passed and nothing ran them, so the only
-# thing standing between a broken build and npm was `prepublishOnly` -- which runs at publish time,
-# long after the mistake was made and merged.
+# This repo had no CI. Its whole suite passed locally and nothing ran it on push, so the
+# only thing between a broken build and npm was `prepublishOnly` -- which fires at publish time, long
+# after the mistake was merged.
 #
-# That is not hypothetical here. The DDB canonical preimage omitted the signed nonce, so every
-# client-signed operation this SDK produced was rejected on chain, and the golden test that should have
-# caught it pinned a constant computed from the SDK's own broken encoding. A gate would not have caught
-# that either -- but it will catch the next thing, and it makes the tests worth keeping correct.
+# That is not hypothetical. The DDB canonical preimage once omitted the signed nonce, so every
+# client-signed operation this SDK produced was rejected on chain; and `deriveDbName` silently drifted
+# out of step with the node's ddbschema.DeriveDbName for months. tests/ddb-schema-name.test.ts pins the
+# derivation against schema names a REAL node created, which is why it is worth running on every push:
+# reintroducing the old short-suffix scheme fails it immediately. Measured on a clean-room clone by
+# mutating src/ddb.ts to `return 'c_' + hex.slice(-6)`:
+#
+#   npx jest --ci tests/ddb-schema-name.test.ts
+#   Tests: 14 failed, 14 skipped, 7 passed, 35 total     >>> exit 1
+#
+# (Unmutated, the same command on the same clean-room clone: 14 skipped, 21 passed, 35 total, exit 0.)
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # A MATRIX HERE IS NOT DECORATION. This package declares `engines.node: ">=16.0.0"` and is consumed
+    # from three different runtimes (node via dist/index.cjs.js, browser, react-native). Both legs were
+    # run locally before this file was committed: tsc, the whole suite, and the full rollup + .d.ts build
+    # passed on 20.20.2 and on 22.21.1.
+    #
+    # 22 is Active LTS. 20 is retained ONLY because it is the floor the dependent repos and the
+    # published `engines` range still promise; when they move, drop it rather than letting it rot.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node }}
           cache: npm
 
+      # `npm ci`, never `npm install`: it installs the lockfile exactly and FAILS if package.json and
+      # package-lock.json disagree. That is a gate in itself -- the sibling ncog-trimix-ide repo had
+      # package.json on `@ncog/necjs` while its lockfile still resolved the old unscoped `necjs@1.3.8`,
+      # and nothing noticed because nothing ever installed from a clean lockfile.
+      #
+      # THIS ONLY WORKS BECAUSE package-lock.json IS NOW TRACKED. It was in .gitignore when this
+      # workflow was first written, which made the step above impossible, not merely strict --
+      # measured on a clone of this repo into an empty directory:
+      #
+      #   $ git clone <repo> sdk-baseline && cd sdk-baseline && npm ci
+      #   npm error code EUSAGE
+      #   npm error The `npm ci` command can only install with an existing package-lock.json
+      #   >>> BASELINE_NPM_CI_EXIT=1
+      #
+      # `cache: npm` on setup-node above is documented to fail one step EARLIER without a lockfile
+      # ("Dependencies lock file is not found"), so the run would not even reach this line. FLAGGED AS
+      # NOT MEASURED: that one is the action's documented behaviour, not something anyone here ran --
+      # a GitHub Action cannot be executed on this workstation. Everything else in this file was run.
+      # Do not re-ignore the lockfile.
+      #
+      # WHICH LOCKFILE THIS IS, and why it is not regenerated on every touch. It is lockfileVersion 3,
+      # root `@ncog/necjs@3.0.0`, 735 package entries, and it is a faithful record of the node_modules
+      # this SDK's tests have actually been run against: every one of the 705 entries that exists
+      # in the development tree matches the locked version exactly, 0 mismatches (the other 29 are
+      # platform-gated optional binaries npm skips on Windows). Verified installable and gate-green in
+      # clean-room clones under BOTH matrix legs -- npm 10.8.2 / Node v20.20.2 and npm 10.9.4 /
+      # Node v22.21.1 -- `npm ci` exit 0 on each.
+      #
+      # DO NOT DELETE THIS FILE AND REGENERATE IT to "refresh" the dependency tree. Name the right
+      # command, because the warning that stood here named `npm install --package-lock-only`, and run
+      # as written that command does NOT produce the drift it was quoting -- a warning nobody can
+      # reproduce is a warning the next reader discards. Both halves measured on a scratch copy of
+      # this repo's package.json + package-lock.json, 2026-09-06, npm 10.9.4 / Node v22.21.1:
+      #
+      #   $ npm install --package-lock-only --ignore-scripts          # lockfile still in place
+      #   entries: old=735 new=735   resolved-version differences: 0            >>> EXIT=0
+      #
+      #   $ rm package-lock.json && npm install --package-lock-only --ignore-scripts
+      #   entries: old=735 new=737   resolved-version differences: 55           >>> EXIT=0
+      #   e.g. @babel/generator 7.29.7 -> 7.29.8, @babel/parser 7.29.7 -> 7.29.8,
+      #        @eslint-community/eslint-utils 4.9.1 -> 4.10.1
+      #
+      # With the lockfile present npm honours it and moves nothing. It is REMOVING it -- deleting it
+      # by hand, resolving a merge conflict by dropping it, or running `npm install` in a tree where
+      # it is already gone -- that re-resolves every caret range to whatever the registry has
+      # published since, and silently moves the build off the tree that was tested. Change the
+      # lockfile only as the deliberate result of a dependency change, and re-run this job when you do.
       - run: npm ci
 
-      # Blocking: the type surface is the SDK's contract with every consumer. Four exported signatures
-      # changed in 3.0.0 (the nonce parameters, deriveDbName), and a compile error is exactly how a
-      # caller is supposed to find out.
-      - name: Typecheck
+      # Blocking: the type surface is this SDK's contract with every consumer. Note that tsconfig.json
+      # EXCLUDES tests/, so this checks src only -- the test files are typechecked by ts-jest's
+      # diagnostics in the next step instead. Verified: a type error in tests/ passes this step and
+      # fails that one, so between them nothing is unchecked.
+      - name: Typecheck (src)
         run: npx tsc --noEmit
 
+      # Some tests here report SKIPPED -- not passed, not missing -- and the skip-ledger step below
+      # is what keeps that set honest. One is the `the Trimix IDE copy agrees with the SDK` block in
+      # tests/ddb-schema-name.test.ts, which reads a file out of the sibling ncog-trimix-ide checkout
+      # that a single-repo runner does not have. Everything else, including all 13 live-schema
+      # deriveDbName cases this workflow's header cites, runs here.
+      #
+      # AN EARLIER VERSION OF THIS COMMENT SAID THAT BLOCK IS "gated in the IDE's own CI". IT IS NOT.
+      # A comment promising a check that does not exist is worse than no comment, because the next
+      # reader stops looking. Measured read-only in ncog-trimix-ide on 2026-09-06:
+      #
+      #   $ git status --porcelain .github/workflows/ci.yml .github/scripts/ddb-schema-name-parity.js
+      #   ?? .github/scripts/ddb-schema-name-parity.js
+      #   ?? .github/workflows/ci.yml
+      #   $ git ls-tree -r --name-only HEAD -- .github     # 8 files, neither of those among them
+      #   $ git check-ignore -v .github/workflows/ci.yml   # exit 1 -- not ignored, just never added
+      #
+      # Both files exist only in a working tree, so `actions/checkout` on that repo produces no such
+      # workflow. Until they are committed there, THE IDE'S COPY OF deriveDbName IS GUARDED BY NOTHING
+      # and these 14 assertions run only in a monorepo checkout. Do not restate the claim here; delete
+      # this paragraph when `git ls-tree -r --name-only HEAD -- .github` in ncog-trimix-ide lists both.
+      #
+      # What IS enforced from this repo is the SDK half, plus the shape of the skip set -- see the
+      # ledger step below, which fails if any other test is skipped, if that block stops being exactly
+      # 14 tests, or if the 13 live-schema deriveDbName cases stop being reported PASSED.
+      #
+      # `npm run test:ci` is `jest --ci` plus `--json --outputFile=coverage/jest-report.json` (jest
+      # does not create that directory itself, so the script makes it; coverage/ is already ignored).
+      # --outputFile keeps the normal console summary -- measured: the same `Tests: ...` line and
+      # exit 0 -- so nothing is lost in the log by writing the report.
+      #
+      # It did not used to. Both tests/ddb-schema-name.test.ts and tests/sigv2.test.ts reached out of
+      # the repo at module/describe scope, so on a runner they threw during collection and jest
+      # reported `Test Suites: 2 failed, 12 passed` / `Tests: 124 total` -- 35 tests, the entire
+      # schema-name file, silently absent from the run this workflow exists to perform. Verified on a
+      # clone with no siblings: every suite passes and the skipped set is exactly the declared one.
       - name: Test
-        run: npx jest --ci
+        run: npm run test:ci
 
-      # Blocking: the published artifact is dist/, and nothing else here builds it. A test suite that
-      # passes against src/ while the bundle fails to build ships nothing useful.
-      - name: Build
+      # Blocking, and a separate step for a reason: `jest --ci` exits 0 on a skipped test, so
+      # "14 skipped", "14 deleted" and "40 skipped next month" are the same green tick. This reads the
+      # report the step above just wrote and fails on any skip this repo has not declared in
+      # .github/scripts/skip-ledger-gate.cjs, on that declared block changing size, and on any of the
+      # named live-schema assertions ceasing to be PASSED. Broken on purpose before it was committed,
+      # three ways, each in the clean-room clone:
+      #
+      #   it.each(LIVE_CONTRACTS)  ->  it.skip.each(LIVE_CONTRACTS)   on the live-schema cases
+      #     npm run test:ci   more tests skipped than declared                  >>> exit 0
+      #     skip ledger       FAIL every test that did not run is in the declared ledger
+      #                       FAIL all live-schema deriveDbName cases PASSED (not skipped)   >>> exit 1
+      #
+      #   it.each(LIVE_CONTRACTS)  ->  it.each(LIVE_CONTRACTS.slice(0, 10))   in the IDE block
+      #     npm run test:ci   the declared block shrinks                        >>> exit 0
+      #     skip ledger       FAIL ledger block "..." changed size                            >>> exit 1
+      #
+      #   revert the Test step to plain `jest --ci`, so no report is written
+      #     npx jest --ci                                                       >>> exit 0
+      #     skip ledger       no jest report at coverage/jest-report.json        >>> exit 1
+      #
+      # Note the pattern: in all three the TEST step stayed green. That is the point of the step.
+      - name: Skip ledger
+        run: node .github/scripts/skip-ledger-gate.cjs
+
+      # Blocking: dist/ is the published artifact and nothing else in CI builds it. A suite that passes
+      # against src/ while rollup fails ships nothing. This step also regenerates
+      # src/webassembly/wasm-base64.ts from main.wasm, so it catches a missing or corrupt wasm blob.
+      - name: Build dist/
         run: npm run build
+
+      # THE MONEY-PATH GATE, and the reason the four steps above are not enough.
+      #
+      # WHEN THIS WAS WRITTEN, deleting chainId from the signing preimage left tsc, the whole jest
+      # suite and the build ALL GREEN -- measured on a clean-room clone with no sibling checkouts,
+      # one line changed in src/tx-signer.ts.
+      #
+      # That is no longer reproducible, and the reason matters: tests/key-registry.test.ts has since
+      # added a case that does catch that particular mutant, so jest now exits 1 on it. Deliberately
+      # NOT deleting this step on the strength of that. The suite catching one mutant is not the same
+      # property -- this step verifies the BUILT ARTIFACT (dist/index.cjs.js, what npm publishes),
+      # which no test in the repo loads, and it verifies by CRYPTOGRAPHY rather than by comparison.
+      # Two other mutants were measured going red here that the suite still does not see: gluing a
+      # secp256k1-style V byte onto the ML-DSA signature, and swapping chainId and `from` in the outer
+      # RLP.
+      #
+      # DO NOT paste test counts into this file. Four separate hardcoded totals here went stale within
+      # a day of being written, because another change added tests -- and a stale number in a comment
+      # is read as a fact.
+      #
+      # The suite cannot see it: tests/sigv2.test.ts signs and then round-trips the DECODER, and
+      # chainId survives that round trip because it is still field 8 of the OUTER wire tx. Nothing
+      # asked whether it was inside the bytes the signature covers. This step asks exactly that. It
+      # rebuilds the preimage from the tx parameters using ethers' encodeRlp + keccak256 and calls
+      # ml_dsa87.verify -- verification cannot agree with the mistake the way a comparison against the
+      # SDK's own encoder would. Same mutant, with this step present:
+      #
+      #   FAIL signature verifies against the 9-field preimage INCLUDING chainId
+      #   FAIL signature does NOT verify against the same preimage WITHOUT chainId
+      #        [REPLAY PROTECTION IS NOT SIGNED -- this tx is valid on every NCOG chain]
+      #   FAIL chainId 2479 and 2480 produce DIFFERENT signatures
+      #   SigV2 replay-protection gate: 3 FAILED check(s).                  >>> exit 1
+      #
+      # Two more mutants were run against it in the same clean room, both also green on tsc+jest+build
+      # or caught only here: gluing a secp256k1-style V byte onto the signature (-> `decoded signature
+      # is exactly 4627 bytes [4628 B]`, exit 1) and swapping chainId/from in the outer 11-field RLP
+      # (-> 4 failed checks, exit 1).
+      #
+      # It runs AFTER the build and loads dist/index.cjs.js on purpose: dist/ is what npm publishes and
+      # no test in this repo loads it. `prepublishOnly` runs it too, so this gate is also the last
+      # thing standing between the signer and the registry.
+      - name: SigV2 replay-protection gate (dist/)
+        run: node .github/scripts/sigv2-replay-gate.cjs

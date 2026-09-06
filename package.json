@@ -73,8 +73,11 @@
     "build:types": "tsc --emitDeclarationOnly",
     "build": "rimraf dist && npm run script && rollup -c --bundleConfigAsCjs && npm run build:types",
     "test": "jest --coverage",
+    "test:ci": "node -e \"require('fs').mkdirSync('coverage',{recursive:true})\" && jest --ci --json --outputFile=coverage/jest-report.json",
+    "gate:skips": "node .github/scripts/skip-ledger-gate.cjs",
+    "gate:sigv2": "node .github/scripts/sigv2-replay-gate.cjs",
     "lint": "eslint src --ext .ts",
-    "prepublishOnly": "npm test && npm run build"
+    "prepublishOnly": "npm test && npm run build && npm run gate:sigv2"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",

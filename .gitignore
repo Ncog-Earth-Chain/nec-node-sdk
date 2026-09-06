@@ -34,4 +34,12 @@ coverage/
 *.swo
 
 # Package
-package-lock.json
+# package-lock.json is deliberately NOT ignored. This is a published package (@ncog/necjs) and its
+# CI runs `npm ci`, which cannot run at all without a committed lockfile:
+#   $ git clone <repo> /tmp/x && cd /tmp/x && npm ci
+#   npm error code EUSAGE -- The `npm ci` command can only install with an existing package-lock.json
+# Ignoring it also meant nobody could reproduce a release install; the lockfile existed only on the
+# machine that happened to have run `npm install`.
+
+# Test output: tests/sigv2.test.ts writes the signed golden vector here on every run.
+tests/testdata/
