@@ -6,6 +6,8 @@ export {
 export {
   Ddb, canonicalDdbOperationHash, canonicalDdbRequestId,
   buildDdbOp, privateKeyDdbSigner,
+  buildDdbSignedRead, canonicalDdbSignedReadBytes, canonicalDdbSignedReadHash,
+  type DdbSignedReadEnvelope, type DdbSignedReadOptions, type DdbPreparedRead,
   type DdbSigner, type DdbSignerLike, type DdbPreparedOp, type DdbSignedOpEnvelope,
   // A submit hands back BOTH handles: the endorsement requestId and the node's commit tx hash. The
   // second is the only input ddb_getCommitStatus accepts, and that RPC is the only one that can report

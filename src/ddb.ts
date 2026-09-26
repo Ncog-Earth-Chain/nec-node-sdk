@@ -308,6 +308,118 @@ export function canonicalDdbRequestId(
   ));
 }
 
+// ---------------------------------------------------------------------------
+// Signed reads (ddb_signedSelect)
+// ---------------------------------------------------------------------------
+
+// Domain-separation prefix + version byte (13 bytes): the ASCII "NEC-DDB-READ" then the 0x02 version.
+// == Go canonicalSignedReadDomain (ethapi/ddb_signed_read.go). Distinct from DDB_OP_DOMAIN on purpose:
+// reads and writes are signed by the SAME account key, so a read signature must never be a valid
+// operation signature. 0x02 (SEC-09) added the join table set; a bump here is a client break.
+const DDB_READ_DOMAIN = Uint8Array.of(0x4e, 0x45, 0x43, 0x2d, 0x44, 0x44, 0x42, 0x2d, 0x52, 0x45, 0x41, 0x44, 0x02); // "NEC-DDB-READ" + 0x02
+
+// The node refuses a signed read that names more join tables than this (ethapi maxSignedJoinTables).
+const DDB_MAX_SIGNED_JOIN_TABLES = 32;
+
+const DDB_U256_MAX = (BigInt(1) << BigInt(256)) - BigInt(1);
+
+/** A chain id as the 32-byte big-endian word the node hashes (common.BigToHash(chainID)). */
+function ddbChainIdWord(chainId: number | bigint | string): Uint8Array {
+  if (typeof chainId === 'number' && !Number.isSafeInteger(chainId)) {
+    throw new Error(`DDB chainId must be a safe integer, got ${chainId}; pass a bigint or hex string`);
+  }
+  let x: bigint;
+  try {
+    x = BigInt(chainId);
+  } catch {
+    throw new Error(`DDB chainId is not an integer: ${JSON.stringify(chainId)}`);
+  }
+  if (x < BigInt(0) || x > DDB_U256_MAX) throw new Error(`DDB chainId does not fit in a uint256 word: ${x}`);
+  const b = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--) { b[i] = Number(x & BigInt(0xff)); x >>= BigInt(8); }
+  return b;
+}
+
+// Byte-wise UTF-8 order, which is Go's string order. JS's default sort compares UTF-16 code units and
+// disagrees with it outside the BMP -- and the node refuses a join list that is not strictly ascending.
+function ddbCompareUtf8(a: string, b: string): number {
+  const enc = new TextEncoder();
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  for (let i = 0; i < x.length && i < y.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return x.length - y.length;
+}
+
+/**
+ * The join table set in the ONE form the node accepts (ethapi checkSignedJoinTables): every table the
+ * query joins other than the base table, sorted ascending, no duplicates, no empties, at most 32.
+ * Two orders of the same set would be two preimages for the same request, so the SDK picks the order.
+ */
+function canonicalDdbJoinTables(tableName: string, joinTables: readonly string[] = []): string[] {
+  const out: string[] = [];
+  for (const t of [...joinTables].sort(ddbCompareUtf8)) {
+    if (t === '') throw new Error('DDB joinTables contains an empty table name');
+    if (t === tableName || out[out.length - 1] === t) continue;
+    out.push(t);
+  }
+  if (out.length > DDB_MAX_SIGNED_JOIN_TABLES) {
+    throw new Error(`DDB joinTables names ${out.length} tables; at most ${DDB_MAX_SIGNED_JOIN_TABLES} may be signed into one read`);
+  }
+  return out;
+}
+
+/**
+ * canonicalDdbSignedReadBytes is the exact preimage of the node's ethapi.SignedReadHash -- what a
+ * caller signs to read `schemaName`.`tableName` (plus `joinTables`) as `fromAddr` through
+ * ddb_signedSelect. Pinned against the node's own golden vector (TestSignedReadHashGoldenVector):
+ *
+ *   "NEC-DDB-READ\x02" || chainId(32B word) || lenPrefix(schemaName) || lenPrefix(tableName) ||
+ *   u64BE(count(joinTables)) || lenPrefix(joinTables[i])... || from(20B) || u64BE(timestamp) || u64BE(nonce)
+ *
+ * `joinTables` are hashed in the order given: pass them canonical (buildDdbSignedRead does that).
+ * The QUERY itself -- filters, join conditions, ordering, limit -- is deliberately NOT in the preimage;
+ * see the node's SignedReadHash for why.
+ */
+export function canonicalDdbSignedReadBytes(
+  chainId: number | bigint | string,
+  schemaName: string,
+  tableName: string,
+  joinTables: readonly string[],
+  fromAddr: string,
+  timestamp: number | bigint,
+  nonce: number | bigint,
+): Uint8Array {
+  const enc = new TextEncoder();
+  const fromBytes = ddbHexToBytes(fromAddr);
+  if (fromBytes.length !== 20) throw new Error(`invalid from address length: ${fromBytes.length} (expected 20)`);
+  const ts = ddbU64('timestamp', timestamp);
+  const nce = ddbU64('nonce', nonce);
+  return ddbConcat(
+    DDB_READ_DOMAIN, // already includes the 0x02 version byte
+    ddbChainIdWord(chainId),
+    ddbLenPrefixed(enc.encode(schemaName)),
+    ddbLenPrefixed(enc.encode(tableName)),
+    ddbU64BE(joinTables.length),
+    ...joinTables.map((t) => ddbLenPrefixed(enc.encode(t))),
+    fromBytes,
+    ddbU64BE(ts),
+    ddbU64BE(nce),
+  );
+}
+
+/** keccak256(canonicalDdbSignedReadBytes(...)) -- the 32 bytes the node verifies callerSig over. */
+export function canonicalDdbSignedReadHash(
+  chainId: number | bigint | string,
+  schemaName: string,
+  tableName: string,
+  joinTables: readonly string[],
+  fromAddr: string,
+  timestamp: number | bigint,
+  nonce: number | bigint,
+): Uint8Array {
+  return keccak_256(canonicalDdbSignedReadBytes(chainId, schemaName, tableName, joinTables, fromAddr, timestamp, nonce));
+}
+
 // One-time deprecation warning for the legacy server-signed DDB methods (fires once per method per process).
 const _ddbWarned = new Set<string>();
 function ddbWarnDeprecated(method: string, replacement: string): void {
@@ -510,6 +622,79 @@ export function buildDdbOp(
       from,
       timestamp: ddbU64Hex(timestamp),
       gasLimit: ddbU64Hex(gasLimit),
+      nonce: ddbU64Hex(nonce),
+      callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
+    },
+  };
+}
+
+/** The signed half of a `ddb_signedSelect` request, exactly as the node parses it (ethapi.SignedDdbRead). */
+export interface DdbSignedReadEnvelope {
+  schemaName: string;
+  tableName: string;
+  /** Omitted for a single-table read, as the node's `omitempty` does. */
+  joinTables?: string[];
+  from: string;
+  timestamp: string;
+  nonce: string;
+  callerPubKey: string;
+  callerSig: string;
+}
+
+/** Options for a signed read. Everything here except `chainId` is part of the signed preimage. */
+export interface DdbSignedReadOptions {
+  /**
+   * The network the signature is bound to. Defaults to asking the node (eth_chainId) in
+   * Ddb.signedSelect; buildDdbSignedRead requires it. A read signed for one network is refused on another.
+   */
+  chainId?: number | bigint | string;
+  /**
+   * Every OTHER table the query's `joins` touch. Signed: the node refuses a query that joins a table
+   * outside {tableName} ∪ joinTables. Any order; the SDK canonicalizes it (sorted, unique, base removed).
+   */
+  joinTables?: string[];
+  /** UNIX SECONDS, defaulting to now. The node refuses a read outside its freshness window. */
+  timestamp?: number;
+  /** Defaults to 8 random bytes. The node serves each signing hash once, so never reuse one. */
+  nonce?: number | bigint;
+}
+
+/** A signed read prepared for signing: what to sign, and the envelope it becomes. */
+export interface DdbPreparedRead {
+  /** The 32 bytes to sign. Sign AS-IS -- no EIP-191 prefix. */
+  hash: Uint8Array;
+  /** The envelope, complete except for `callerSig`. */
+  envelope: Omit<DdbSignedReadEnvelope, 'callerSig'>;
+}
+
+/**
+ * Build a signed read ready to sign, without signing it -- the read counterpart of buildDdbOp, for a
+ * key the SDK cannot reach. `from` and `callerPubKey` must belong to the key that signs.
+ */
+export function buildDdbSignedRead(
+  chainId: number | bigint | string,
+  schemaName: string,
+  tableName: string,
+  from: string,
+  callerPubKey: Uint8Array,
+  opts: Omit<DdbSignedReadOptions, 'chainId'> = {},
+): DdbPreparedRead {
+  if (!schemaName || !tableName) throw new Error('DDB signed read needs schemaName and tableName; both are signed');
+  const joinTables = canonicalDdbJoinTables(tableName, opts.joinTables);
+  // Same unit and the same milliseconds trap as buildDdbOp: see DDB_MAX_TIMESTAMP_SECONDS.
+  const timestamp = ddbU64('timestamp', opts.timestamp ?? Math.floor(Date.now() / 1000));
+  if (timestamp > DDB_MAX_TIMESTAMP_SECONDS) {
+    throw new Error(`DDB timestamp ${timestamp} is not unix seconds — it looks like milliseconds.`);
+  }
+  const nonce = ddbU64('nonce', opts.nonce ?? ddbRandomNonce());
+  return {
+    hash: canonicalDdbSignedReadHash(chainId, schemaName, tableName, joinTables, from, timestamp, nonce),
+    envelope: {
+      schemaName,
+      tableName,
+      ...(joinTables.length ? { joinTables } : {}),
+      from,
+      timestamp: ddbU64Hex(timestamp),
       nonce: ddbU64Hex(nonce),
       callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
     },
@@ -854,6 +1039,40 @@ export class Ddb {
   /** Simple row fetch (up to `limit` rows). `schemaName` is the derived db_name (Ddb.deriveDbName). */
   query(schemaName: string, tableName: string, limit = 100): Promise<DdbRow[]> {
     return this.call('ddb_query', [schemaName, tableName, limit]);
+  }
+
+  /**
+   * Read rows as a SIGNED caller (ddb_signedSelect) -- the only way to read a contract that declares a
+   * reader role: select/query are anonymous and the node refuses them for such a contract. The node
+   * verifies the signature, then checks that `from` holds a reader role, BEFORE any SQL runs.
+   *
+   * Signed: chain id, schema, table, `readOpts.joinTables`, from, timestamp, nonce. NOT signed: `query`
+   * (filters, joins, ordering, limit), which travels beside the envelope. Each signed read is single use.
+   */
+  async signedSelect(
+    signer: DdbSignerLike,
+    schemaName: string,
+    tableName: string,
+    query: DdbQueryOptions | Record<string, unknown> = {},
+    readOpts: DdbSignedReadOptions = {},
+  ): Promise<DdbRow[]> {
+    const s = toDdbSigner(signer);
+    const chainId = readOpts.chainId ?? (await this.call('eth_chainId'));
+    const prepared = buildDdbSignedRead(
+      chainId, schemaName, tableName, await s.getAddress(), await s.getPublicKey(), readOpts,
+    );
+    const sig = await s.signDdbHash(prepared.hash);
+    const envelope: DdbSignedReadEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
+    return this.call('ddb_signedSelect', [envelope, query]);
+  }
+
+  /**
+   * Run a READ-ONLY contract procedure node-locally and return its rows (ddb_callReadProcedure). Only a
+   * procedure the active contract declares `"read_only": true` is accepted; `args` are bound, never
+   * interpolated. Anonymous, so the node refuses it for a reader-role contract like select/query.
+   */
+  callReadProcedure(schemaName: string, procedure: string, args: string[] = []): Promise<DdbRow[]> {
+    return this.call('ddb_callReadProcedure', [schemaName, procedure, args]);
   }
 
   // ---------------------------------------------------------------------------
