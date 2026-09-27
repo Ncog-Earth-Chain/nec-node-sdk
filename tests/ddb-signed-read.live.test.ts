@@ -1,7 +1,8 @@
 /**
  * REL-02 against a LIVE node (opt-in): the SDK's own Ddb.signedSelect reads a reader-role contract's
  * rows as an account holding the role, and the node refuses the same read from an account that does not,
- * and refuses an anonymous select.
+ * and refuses an anonymous select. REL-02b (NEC-140): the same for a read procedure through
+ * Ddb.signedCallReadProcedure, whose NEC-DDB-READPROC signature the node must verify.
  *
  * Skipped unless NEC_LIVE_RPC names a node RPC. The node must server-sign for NEC_LIVE_AUTHOR (the
  * docker-free testbed does: ncogearthchain scripts/run-local-testbed.sh up), which is only used to DEPLOY
@@ -50,7 +51,11 @@ live('REL-02 live: a reader-role contract through the SDK', () => {
       schema: { tables: [{ name: 't', columns: [
         { name: 'id', type: 'bigint', constraints: ['primary key'] },
         { name: 'v', type: 'text', constraints: [] }], indexes: [] }] },
-      procedures: [{ name: 'insertRow', body: "INSERT INTO t (id, v) VALUES (1, 'sdk-reader')" }],
+      procedures: [
+        { name: 'insertRow', body: "INSERT INTO t (id, v) VALUES (1, 'sdk-reader')" },
+        { name: 'notesFrom', params: [{ name: 'minid', type: 'bigint' }], returns: 'TABLE(note TEXT)',
+          body: 'SELECT v FROM t WHERE id = minid', read_only: true },
+      ],
       roles: ['reader'], role_assignments: { reader: [reader] }, procedure_access: [], metadata: {},
     };
     await waitDurable(p, await p.send('ddb_createSchema', [AUTHOR, 'rel02sdk', JSON.stringify(def)]));
@@ -63,5 +68,11 @@ live('REL-02 live: a reader-role contract through the SDK', () => {
 
     await expect(ddb.signedSelect(outsiderKey, db, 't')).rejects.toThrow(/holds no role covering "reader"/);
     await expect(p.send('ddb_select', [db, 't', {}])).rejects.toThrow(/not world-readable/);
+
+    // REL-02b: the read procedure, signed by the SDK and verified by the node.
+    const procRows = await ddb.signedCallReadProcedure(readerKey, db, 'notesFrom', ['1']);
+    expect(procRows).toEqual([{ note: 'sdk-reader' }]);
+    await expect(ddb.signedCallReadProcedure(outsiderKey, db, 'notesFrom', ['1'])).rejects.toThrow(/holds no role covering "reader"/);
+    await expect(ddb.callReadProcedure(db, 'notesFrom', ['1'])).rejects.toThrow(/not world-readable/);
   });
 });
