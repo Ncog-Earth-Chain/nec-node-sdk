@@ -420,6 +420,73 @@ export function canonicalDdbSignedReadHash(
   return keccak_256(canonicalDdbSignedReadBytes(chainId, schemaName, tableName, joinTables, fromAddr, timestamp, nonce));
 }
 
+// ---------------------------------------------------------------------------
+// Signed read procedures (ddb_signedCallReadProcedure, REL-02b)
+// ---------------------------------------------------------------------------
+
+// Domain-separation prefix + version byte (17 bytes): the ASCII "NEC-DDB-READPROC" then the 0x01 version.
+// == Go canonicalSignedReadProcDomain (ethapi/ddb_signed_read_procedure.go). A SEPARATE domain from
+// DDB_READ_DOMAIN: with no args the two preimages have the same layout, so the prefix is the only thing
+// that stops a signed read of table T being a signed call of procedure T. A bump here is a client break.
+const DDB_READPROC_DOMAIN = Uint8Array.of(
+  0x4e, 0x45, 0x43, 0x2d, 0x44, 0x44, 0x42, 0x2d, 0x52, 0x45, 0x41, 0x44, 0x50, 0x52, 0x4f, 0x43, 0x01,
+); // "NEC-DDB-READPROC" + 0x01
+
+// The node refuses a signed call with more arguments than this (ethapi maxSignedReadProcArgs, which is
+// Postgres' FUNC_MAX_ARGS).
+const DDB_MAX_SIGNED_READPROC_ARGS = 100;
+
+/**
+ * canonicalDdbSignedReadProcedureBytes is the exact preimage of the node's
+ * ethapi.SignedReadProcedureHash -- what a caller signs to call read procedure `procedure` of
+ * `schemaName` with `args` as `fromAddr` through ddb_signedCallReadProcedure. Pinned against the node's
+ * golden vector (TestSignedReadProcedureHashGoldenVector):
+ *
+ *   "NEC-DDB-READPROC\x01" || chainId(32B word) || lenPrefix(schemaName) || lenPrefix(procedure) ||
+ *   u64BE(count(args)) || lenPrefix(args[i])... || from(20B) || u64BE(timestamp) || u64BE(nonce)
+ *
+ * Unlike a signed select, the whole call is signed: the procedure name and every argument, in order.
+ */
+export function canonicalDdbSignedReadProcedureBytes(
+  chainId: number | bigint | string,
+  schemaName: string,
+  procedure: string,
+  args: readonly string[],
+  fromAddr: string,
+  timestamp: number | bigint,
+  nonce: number | bigint,
+): Uint8Array {
+  const enc = new TextEncoder();
+  const fromBytes = ddbHexToBytes(fromAddr);
+  if (fromBytes.length !== 20) throw new Error(`invalid from address length: ${fromBytes.length} (expected 20)`);
+  const ts = ddbU64('timestamp', timestamp);
+  const nce = ddbU64('nonce', nonce);
+  return ddbConcat(
+    DDB_READPROC_DOMAIN, // already includes the 0x01 version byte
+    ddbChainIdWord(chainId),
+    ddbLenPrefixed(enc.encode(schemaName)),
+    ddbLenPrefixed(enc.encode(procedure)),
+    ddbU64BE(args.length),
+    ...args.map((a) => ddbLenPrefixed(enc.encode(a))),
+    fromBytes,
+    ddbU64BE(ts),
+    ddbU64BE(nce),
+  );
+}
+
+/** keccak256(canonicalDdbSignedReadProcedureBytes(...)) -- the 32 bytes the node verifies callerSig over. */
+export function canonicalDdbSignedReadProcedureHash(
+  chainId: number | bigint | string,
+  schemaName: string,
+  procedure: string,
+  args: readonly string[],
+  fromAddr: string,
+  timestamp: number | bigint,
+  nonce: number | bigint,
+): Uint8Array {
+  return keccak_256(canonicalDdbSignedReadProcedureBytes(chainId, schemaName, procedure, args, fromAddr, timestamp, nonce));
+}
+
 // One-time deprecation warning for the legacy server-signed DDB methods (fires once per method per process).
 const _ddbWarned = new Set<string>();
 function ddbWarnDeprecated(method: string, replacement: string): void {
@@ -693,6 +760,67 @@ export function buildDdbSignedRead(
       schemaName,
       tableName,
       ...(joinTables.length ? { joinTables } : {}),
+      from,
+      timestamp: ddbU64Hex(timestamp),
+      nonce: ddbU64Hex(nonce),
+      callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
+    },
+  };
+}
+
+/** A `ddb_signedCallReadProcedure` request, exactly as the node parses it (ethapi.SignedDdbReadProcedure). */
+export interface DdbSignedReadProcedureEnvelope {
+  schemaName: string;
+  procedure: string;
+  /** Omitted for a procedure with no parameters, as the node's `omitempty` does. */
+  args?: string[];
+  from: string;
+  timestamp: string;
+  nonce: string;
+  callerPubKey: string;
+  callerSig: string;
+}
+
+/** Options for a signed read-procedure call; everything except `chainId` is in the signed preimage. */
+export type DdbSignedReadProcedureOptions = Omit<DdbSignedReadOptions, 'joinTables'>;
+
+/** A signed read-procedure call prepared for signing: what to sign, and the envelope it becomes. */
+export interface DdbPreparedReadProcedure {
+  /** The 32 bytes to sign. Sign AS-IS -- no EIP-191 prefix. */
+  hash: Uint8Array;
+  /** The envelope, complete except for `callerSig`. */
+  envelope: Omit<DdbSignedReadProcedureEnvelope, 'callerSig'>;
+}
+
+/**
+ * Build a signed read-procedure call ready to sign, without signing it -- for a key the SDK cannot
+ * reach (a wallet). `from` and `callerPubKey` must belong to the key that signs.
+ */
+export function buildDdbSignedReadProcedure(
+  chainId: number | bigint | string,
+  schemaName: string,
+  procedure: string,
+  args: readonly string[],
+  from: string,
+  callerPubKey: Uint8Array,
+  opts: Omit<DdbSignedReadProcedureOptions, 'chainId'> = {},
+): DdbPreparedReadProcedure {
+  if (!schemaName || !procedure) throw new Error('DDB signed read-procedure call needs schemaName and procedure; both are signed');
+  if (args.length > DDB_MAX_SIGNED_READPROC_ARGS) {
+    throw new Error(`DDB read procedure call has ${args.length} args; a procedure takes at most ${DDB_MAX_SIGNED_READPROC_ARGS}`);
+  }
+  const timestamp = ddbU64('timestamp', opts.timestamp ?? Math.floor(Date.now() / 1000));
+  if (timestamp > DDB_MAX_TIMESTAMP_SECONDS) {
+    throw new Error(`DDB timestamp ${timestamp} is not unix seconds — it looks like milliseconds.`);
+  }
+  const nonce = ddbU64('nonce', opts.nonce ?? ddbRandomNonce());
+  const argList = [...args];
+  return {
+    hash: canonicalDdbSignedReadProcedureHash(chainId, schemaName, procedure, argList, from, timestamp, nonce),
+    envelope: {
+      schemaName,
+      procedure,
+      ...(argList.length ? { args: argList } : {}),
       from,
       timestamp: ddbU64Hex(timestamp),
       nonce: ddbU64Hex(nonce),
@@ -1073,6 +1201,32 @@ export class Ddb {
    */
   callReadProcedure(schemaName: string, procedure: string, args: string[] = []): Promise<DdbRow[]> {
     return this.call('ddb_callReadProcedure', [schemaName, procedure, args]);
+  }
+
+  /**
+   * Call a READ-ONLY contract procedure as a SIGNED caller (ddb_signedCallReadProcedure) -- the only way
+   * to call one on a contract that declares a reader role: callReadProcedure is anonymous and the node
+   * refuses it for such a contract. The node verifies the signature, then checks that `from` holds a
+   * reader role, BEFORE the procedure runs.
+   *
+   * Signed: chain id, schema, procedure, every arg (in order), from, timestamp, nonce -- the whole call.
+   * Each signed call is single use.
+   */
+  async signedCallReadProcedure(
+    signer: DdbSignerLike,
+    schemaName: string,
+    procedure: string,
+    args: string[] = [],
+    opts: DdbSignedReadProcedureOptions = {},
+  ): Promise<DdbRow[]> {
+    const s = toDdbSigner(signer);
+    const chainId = opts.chainId ?? (await this.call('eth_chainId'));
+    const prepared = buildDdbSignedReadProcedure(
+      chainId, schemaName, procedure, args, await s.getAddress(), await s.getPublicKey(), opts,
+    );
+    const sig = await s.signDdbHash(prepared.hash);
+    const envelope: DdbSignedReadProcedureEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
+    return this.call('ddb_signedCallReadProcedure', [envelope]);
   }
 
   // ---------------------------------------------------------------------------
