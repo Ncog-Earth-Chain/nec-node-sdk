@@ -84,6 +84,34 @@ export interface DdbSignOptions {
    * a deterministic hash (tests, golden vectors).
    */
   nonce?: number | bigint;
+  /**
+   * Which operation preimage to sign: 1 ("NEC-DDB-OP\x01", the default) or 2 ("NEC-DDB-OP\x02", SEC-03).
+   *
+   * v2 binds the chain id, the database identity, `expiry` and `keyVersion`. It is valid ONLY on a
+   * network where FeatureDdbOpPreimageV2 is active; a v1 network refuses a v2 signature and vice versa,
+   * and the node reports its rules over no RPC, so the SDK cannot find out for itself. It therefore
+   * never switches on its own: set this (or `new Ddb(provider, { opPreimageVersion: 2 })`) once the
+   * network you target has activated the feature.
+   */
+  preimageVersion?: DdbOpPreimageVersion;
+  /** v2 only. The network the operation is bound to. Ddb asks the node (eth_chainId); buildDdbOp requires it. */
+  chainId?: number | bigint | string;
+  /**
+   * v2 only. UNIX SECONDS after which the node refuses the operation. Defaults to timestamp + 300.
+   * The node admits it only if it is non-zero, not before `timestamp`, and at most 900 s after it.
+   */
+  expiry?: number | bigint;
+  /** v2 only. The signing key's version, signed as an assertion (the node does not enforce it yet). Defaults to 0. */
+  keyVersion?: number | bigint;
+}
+
+/** The DDB operation preimage versions this SDK can sign. */
+export type DdbOpPreimageVersion = 1 | 2;
+
+/** Client-wide defaults for a {@link Ddb}. */
+export interface DdbOptions {
+  /** The preimage every signed write uses unless the call says otherwise. Defaults to 1. See DdbSignOptions. */
+  opPreimageVersion?: DdbOpPreimageVersion;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +199,11 @@ type DdbOpTypeName = keyof typeof DDB_OP_TYPE;
 
 // Domain-separation prefix + version byte (11 bytes): the ASCII "NEC-DDB-OP" then the 0x01 version.
 const DDB_OP_DOMAIN = Uint8Array.of(0x4e, 0x45, 0x43, 0x2d, 0x44, 0x44, 0x42, 0x2d, 0x4f, 0x50, 0x01); // "NEC-DDB-OP" + 0x01 == Go canonicalOpDomain
+// The v2 domain (SEC-03): the same ASCII, version byte 0x02 == Go canonicalOpDomainV2. A bump is a client break.
+const DDB_OP_DOMAIN_V2 = Uint8Array.of(0x4e, 0x45, 0x43, 0x2d, 0x44, 0x44, 0x42, 0x2d, 0x4f, 0x50, 0x02);
+// The node's v2 admission ceiling on Expiry - Timestamp, and the SDK's default lifetime (well inside it).
+const DDB_MAX_EXPIRY_WINDOW_SECONDS = BigInt(900);
+const DDB_DEFAULT_EXPIRY_SECONDS = BigInt(300);
 
 function ddbStripHex(h: string): string {
   return h.startsWith('0x') || h.startsWith('0X') ? h.slice(2) : h;
@@ -349,6 +382,157 @@ export function canonicalDdbRequestId(
     canonicalDdbOperationBytes(typeByte, schemaName, data, fromAddr, timestamp, gasLimit, nonce),
     reqBytes,
   ));
+}
+
+// ---------------------------------------------------------------------------
+// Operation preimage v2 (SEC-03): gossip/ddb/op_preimage.go canonicalOperationBytesV2
+// ---------------------------------------------------------------------------
+
+/** Every field of a v2 operation preimage. `type` is the numeric inter.DdbOperationType (0..9). */
+export interface DdbCanonicalOpV2 {
+  type: number;
+  chainId: number | bigint | string;
+  schemaName: string;
+  /** The EXACT compact-JSON payload bytes, as in v1. */
+  data: Uint8Array;
+  from: string;
+  timestamp: number | bigint;
+  gasLimit: number | bigint;
+  nonce: number | bigint;
+  expiry: number | bigint;
+  keyVersion: number | bigint;
+}
+
+// Go's encoding/json matches a struct field by case-insensitive name (bytes.EqualFold / foldName). For
+// the letters of "contract_address" the only non-ASCII runes that fold onto them are U+017F (long s ->
+// s) and U+212A (Kelvin sign -> k).
+function ddbGoJsonKeyIs(key: string, field: string): boolean {
+  const k = key.replace(/\u017f/g, 's').replace(/\u212a/g, 'k');
+  return /^[\x00-\x7f]*$/.test(k) && k.toLowerCase() === field;
+}
+
+// The top-level members of a JSON object text, IN ORDER and WITH duplicates -- JSON.parse keeps only the
+// last of a duplicated key, and Go does not: it decodes every one in turn, and a null or a type error
+// on an earlier one matters. `text` is known valid JSON (the caller parsed it first).
+function ddbTopLevelMembers(text: string): Array<[string, unknown]> {
+  let i = 0;
+  const ws = () => { while (i < text.length && ' \t\n\r'.includes(text[i])) i++; };
+  const str = (): string => {
+    const start = i++;
+    while (text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    i++;
+    return JSON.parse(text.slice(start, i));
+  };
+  const value = (): unknown => {
+    const start = i;
+    if (text[i] === '"') {
+      str();
+    } else if (text[i] === '{' || text[i] === '[') {
+      let depth = 0;
+      do {
+        if (text[i] === '"') { str(); continue; }
+        if (text[i] === '{' || text[i] === '[') depth++;
+        else if (text[i] === '}' || text[i] === ']') depth--;
+        i++;
+      } while (depth > 0);
+    } else {
+      while (i < text.length && !',}] \t\n\r'.includes(text[i])) i++; // number, true, false, null
+    }
+    return JSON.parse(text.slice(start, i));
+  };
+  const out: Array<[string, unknown]> = [];
+  ws();
+  if (text[i] !== '{') return out;
+  i++;
+  for (;;) {
+    ws();
+    if (text[i] === '}') return out;
+    const key = str();
+    ws(); i++; // ':'
+    ws();
+    out.push([key, value()]);
+    ws();
+    if (text[i] === ',') i++;
+  }
+}
+
+/**
+ * The database identity a v2 preimage binds -- Go preimageDbIdentity. For CreateSchema (0) and
+ * UpdateSchema (1) it is the db_name the node DERIVES from Data's top-level `contract_address`
+ * (ddbschema.DeriveDbName: "c_" + lower-case hex, no 0x), not SchemaName, because for an upgrade the
+ * two differ and the derived one is what the operation actually writes. It is "" when Data does not
+ * decode as a contract definition or the address is not hex. Every other type binds SchemaName.
+ *
+ * Decoding follows encoding/json for this one field: case-insensitive key, every duplicate applied in
+ * order (so the last wins), null leaves the value alone, and a non-string value is a decode error. It
+ * does NOT reproduce a type error in some OTHER field of ContractDefinition (the node would then bind
+ * ""); such a definition is not deployable, and the mismatch only fails the signature.
+ */
+export function ddbOpPreimageDbIdentity(typeByte: number, schemaName: string, data: Uint8Array): string {
+  if (typeByte !== 0 && typeByte !== 1) return schemaName;
+  const text = new TextDecoder().decode(data);
+  let top: unknown;
+  try {
+    top = JSON.parse(text);
+  } catch {
+    return '';
+  }
+  if (top === null) return ''; // Go decodes null into the zero struct: no address, so ""
+  if (typeof top !== 'object' || Array.isArray(top)) return '';
+  let addr = '';
+  for (const [k, v] of ddbTopLevelMembers(text)) {
+    if (!ddbGoJsonKeyIs(k, 'contract_address')) continue;
+    if (v === null) continue;
+    if (typeof v !== 'string') return '';
+    addr = v;
+  }
+  // DeriveDbName: TrimSpace, lower-case, strip one "0x", non-empty lower-case hex.
+  const h = addr.trim().toLowerCase().replace(/^0x/, '');
+  return h && /^[0-9a-f]+$/.test(h) ? 'c_' + h : '';
+}
+
+/**
+ * The v2 operation preimage, byte for byte as the node builds it once FeatureDdbOpPreimageV2 is active:
+ *   "NEC-DDB-OP\x02" || type(1B, offset 11 as in v1) || chainId(32B word) || lenPrefix(dbIdentity) ||
+ *   lenPrefix(schemaName) || lenPrefix(data) || from(20B) || u64BE(timestamp) || u64BE(gasLimit) ||
+ *   u64BE(nonce) || u64BE(expiry) || u64BE(keyVersion)
+ * Pinned against the node's canonicalOpVectorsV2 in tests/ddb-preimage-v2.test.ts.
+ */
+export function canonicalDdbOperationBytesV2(op: DdbCanonicalOpV2): Uint8Array {
+  // The node has ten types (0..9). A value outside that range is refused rather than masked to a byte:
+  // `undefined & 0xff` is 0, which is how necjs 3.0.0 signed a delete as a CreateSchema.
+  if (!Number.isInteger(op.type) || op.type < 0 || op.type > 9) {
+    throw new Error(`unknown DDB operation type ${JSON.stringify(op.type)}`);
+  }
+  const fromBytes = ddbHexToBytes(op.from);
+  if (fromBytes.length !== 20) throw new Error(`invalid from address length: ${fromBytes.length} (expected 20)`);
+  const enc = new TextEncoder();
+  return ddbConcat(
+    DDB_OP_DOMAIN_V2,
+    Uint8Array.of(op.type),
+    ddbChainIdWord(op.chainId),
+    ddbLenPrefixed(enc.encode(ddbOpPreimageDbIdentity(op.type, op.schemaName, op.data))),
+    ddbLenPrefixed(enc.encode(op.schemaName)),
+    ddbLenPrefixed(op.data),
+    fromBytes,
+    ddbU64BE(ddbU64('timestamp', op.timestamp)),
+    ddbU64BE(ddbU64('gasLimit', op.gasLimit)),
+    ddbU64BE(ddbU64('nonce', op.nonce)),
+    ddbU64BE(ddbU64('expiry', op.expiry)),
+    ddbU64BE(ddbU64('keyVersion', op.keyVersion)),
+  );
+}
+
+/** keccak256(canonicalDdbOperationBytesV2(op)) -- the 32 bytes a v2 caller signs. */
+export function canonicalDdbOperationHashV2(op: DdbCanonicalOpV2): Uint8Array {
+  return keccak_256(canonicalDdbOperationBytesV2(op));
+}
+
+/** The v2 endorsement request id: keccak256(canonicalDdbOperationBytesV2(op) || requester). */
+export function canonicalDdbRequestIdV2(op: DdbCanonicalOpV2, requester: string): Uint8Array {
+  const reqBytes = ddbHexToBytes(requester);
+  if (reqBytes.length !== 20) throw new Error(`invalid requester length: ${reqBytes.length} (expected 20)`);
+  return keccak_256(ddbConcat(canonicalDdbOperationBytesV2(op), reqBytes));
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +804,10 @@ export interface DdbSignedOpEnvelope {
   timestamp: string;
   gasLimit: string;
   nonce: string;
+  /** Preimage v2 only (SEC-03): unix seconds, hexutil.Uint64. Absent under v1, as a pre-SEC-03 client sends. */
+  expiry?: string;
+  /** Preimage v2 only (SEC-03): hexutil.Uint64. */
+  keyVersion?: string;
   callerPubKey: string;
   callerSig: string;
 }
@@ -732,22 +920,55 @@ export function buildDdbOp(
   if (typeByte === undefined) {
     throw new Error(`unknown DDB operation type ${JSON.stringify(typeName)}`);
   }
+  const envelope = {
+    type: typeName,
+    schemaName,
+    data: '0x' + ddbBytesToHex(dataBytes),
+    from,
+    timestamp: ddbU64Hex(timestamp),
+    gasLimit: ddbU64Hex(gasLimit),
+    nonce: ddbU64Hex(nonce),
+    callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
+  };
 
+  const version = opts.preimageVersion ?? 1;
+  if (version === 1) {
+    // v1 signs neither field. Sending one anyway would put an UNSIGNED value on the envelope that a
+    // v2 node reads as signed -- refuse it rather than drop it silently.
+    if (opts.expiry !== undefined || opts.keyVersion !== undefined) {
+      throw new Error('DDB expiry and keyVersion are signed only under operation preimage v2; pass preimageVersion: 2');
+    }
+    return {
+      hash: canonicalDdbOperationHash(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce),
+      requestId: '0x' + ddbBytesToHex(
+        canonicalDdbRequestId(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce, from),
+      ),
+      envelope,
+    };
+  }
+  if (version !== 2) throw new Error(`unknown DDB operation preimage version ${JSON.stringify(version)}`);
+
+  // v2 (SEC-03). The chain id is signed, so it is never guessed: Ddb asks the node, a direct caller says.
+  if (opts.chainId === undefined) {
+    throw new Error('DDB operation preimage v2 binds the chain id: pass opts.chainId (Ddb fills it from eth_chainId)');
+  }
+  // The node's admission rule (gossip/ddb CheckOperationExpiry), checked here against `timestamp`
+  // rather than the clock, so a fixed vector still builds. The "not in the past" half is the node's.
+  const expiry = ddbU64('expiry', opts.expiry ?? timestamp + DDB_DEFAULT_EXPIRY_SECONDS);
+  if (expiry === BigInt(0)) throw new Error('DDB expiry must be non-zero under preimage v2');
+  if (expiry < timestamp) throw new Error(`DDB expiry ${expiry} is before the operation timestamp ${timestamp}`);
+  if (expiry - timestamp > DDB_MAX_EXPIRY_WINDOW_SECONDS) {
+    throw new Error(`DDB expiry ${expiry} is more than 900 s after the timestamp ${timestamp}; the node refuses it`);
+  }
+  const keyVersion = ddbU64('keyVersion', opts.keyVersion ?? 0);
+  const op: DdbCanonicalOpV2 = {
+    type: typeByte, chainId: opts.chainId, schemaName, data: dataBytes, from,
+    timestamp, gasLimit, nonce, expiry, keyVersion,
+  };
   return {
-    hash: canonicalDdbOperationHash(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce),
-    requestId: '0x' + ddbBytesToHex(
-      canonicalDdbRequestId(typeByte, schemaName, dataBytes, from, timestamp, gasLimit, nonce, from),
-    ),
-    envelope: {
-      type: typeName,
-      schemaName,
-      data: '0x' + ddbBytesToHex(dataBytes),
-      from,
-      timestamp: ddbU64Hex(timestamp),
-      gasLimit: ddbU64Hex(gasLimit),
-      nonce: ddbU64Hex(nonce),
-      callerPubKey: '0x' + ddbBytesToHex(callerPubKey),
-    },
+    hash: canonicalDdbOperationHashV2(op),
+    requestId: '0x' + ddbBytesToHex(canonicalDdbRequestIdV2(op, from)),
+    envelope: { ...envelope, expiry: ddbU64Hex(expiry), keyVersion: ddbU64Hex(keyVersion) },
   };
 }
 
@@ -925,7 +1146,11 @@ export function buildDdbSignedReadProcedure(
  *   const callTx = await ddb.callProcedureSigned(myPrivKeyHex, schema, 'addUser', ['alice', '30']);
  */
 export class Ddb {
-  constructor(private readonly provider: Provider) {}
+  /**
+   * `options.opPreimageVersion` picks the operation preimage every signed write uses (default 1). Set it
+   * to 2 only for a network where FeatureDdbOpPreimageV2 is active; see DdbSignOptions.preimageVersion.
+   */
+  constructor(private readonly provider: Provider, private readonly options: DdbOptions = {}) {}
 
   /**
    * Derive the schema (db_name) a contract's tables / procedures / roles live under, mirroring the
@@ -1002,7 +1227,11 @@ export class Ddb {
 
     // buildDdbOp does the compaction, the timestamp/gasLimit defaults and the fresh nonce, so the
     // raw-key path and the wallet path cannot drift: both submit bytes produced by the same function.
-    const prepared = buildDdbOp(typeName, schemaName, data, from, pub, opts);
+    // The preimage version: the call's, else this client's, else v1. Under v2 the chain id is signed,
+    // so it comes from the node (eth_chainId) unless the caller pinned one.
+    const preimageVersion = opts.preimageVersion ?? this.options.opPreimageVersion ?? 1;
+    const chainId = preimageVersion === 2 ? (opts.chainId ?? (await this.call('eth_chainId'))) : opts.chainId;
+    const prepared = buildDdbOp(typeName, schemaName, data, from, pub, { ...opts, preimageVersion, chainId });
 
     // The signer receives the canonical operation hash AS-IS. It must not be re-hashed or wrapped in
     // the EIP-191 personal-message prefix on the way through a wallet.
