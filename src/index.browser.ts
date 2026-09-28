@@ -7,6 +7,9 @@ export {
 export {
   Ddb, canonicalDdbOperationHash, canonicalDdbRequestId,
   buildDdbOp, privateKeyDdbSigner,
+  // Operation preimage v2 (SEC-03): opt in per call or per Ddb once the network activates it.
+  canonicalDdbOperationBytesV2, canonicalDdbOperationHashV2, canonicalDdbRequestIdV2, ddbOpPreimageDbIdentity,
+  type DdbCanonicalOpV2, type DdbOpPreimageVersion, type DdbOptions,
   buildDdbSignedRead, canonicalDdbSignedReadBytes, canonicalDdbSignedReadHash,
   type DdbSignedReadEnvelope, type DdbSignedReadOptions, type DdbPreparedRead,
   type DdbSigner, type DdbSignerLike, type DdbPreparedOp, type DdbSignedOpEnvelope,
