@@ -21,6 +21,32 @@ export interface DdbQueryOptions {
   orderDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+  /**
+   * DB-03 read token: the minimum applied version (a block number, hex) the read must reflect -- pass
+   * `readToken` from getCommitStatus / waitForCommitted. The node answers once it has applied through it,
+   * or refuses with {@link DDB_READ_DEADLINE_CODE} after `waitMs`; it never returns older rows as success.
+   * Omit it for today's behaviour (the ingress node's local state, no wait).
+   */
+  minVersion?: string;
+  /** How long the node may wait for `minVersion` (ms). 0/omitted = node default (5 s); capped at 30 s. */
+  waitMs?: number;
+}
+
+/** DB-03 read token alone, for ddb_callReadProcedure's optional fourth parameter. */
+export interface DdbReadConsistency {
+  minVersion?: string;
+  waitMs?: number;
+}
+
+/** JSON-RPC code of a read the node refused because it did not reach `minVersion` in time. Retry, or read elsewhere. */
+export const DDB_READ_DEADLINE_CODE = -32061;
+/** JSON-RPC code of a read the node refused because it cannot report its applied version at all. */
+export const DDB_READ_UNAVAILABLE_CODE = -32062;
+
+/** ddb_selectVersioned result: the rows and the applied version they reflect at least. */
+export interface DdbVersionedRows {
+  rows: DdbRow[];
+  dataVersion: string;
 }
 
 // Options for the client-signed DDB write methods. Both fields are part of the signed
@@ -622,7 +648,20 @@ export interface DdbCommitStatus {
   /** Whether THIS node's Postgres carries the ddb_applied_commits marker yet (apply is async). */
   durable?: boolean;
   durableBlockNumber?: string;
+  /** DB-03: present when applied. Pass it as `minVersion` to read this write through any node. */
+  readToken?: string;
   [k: string]: unknown;
+}
+
+/**
+ * The write outcome per DECIDE-04: `committed` is reported at durable, and finality is a SEPARATE signal.
+ * `readToken` is what a later read passes as `minVersion` to see this write on any ingress node.
+ */
+export interface DdbWriteOutcome {
+  committed: true;
+  readToken: string;
+  finality: { finalized: boolean; blockNumber?: string };
+  status: DdbCommitStatus;
 }
 
 /** An operation prepared for signing: what to sign, and the envelope it becomes. */
@@ -1164,6 +1203,14 @@ export class Ddb {
     return this.call('ddb_select', [schemaName, tableName, opts]);
   }
 
+  /**
+   * ddb_select that also returns `dataVersion`, the applied version the rows reflect at least (DB-03).
+   * Takes the same `minVersion`/`waitMs` token as select.
+   */
+  selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows> {
+    return this.call('ddb_selectVersioned', [schemaName, tableName, opts]);
+  }
+
   /** Simple row fetch (up to `limit` rows). `schemaName` is the derived db_name (Ddb.deriveDbName). */
   query(schemaName: string, tableName: string, limit = 100): Promise<DdbRow[]> {
     return this.call('ddb_query', [schemaName, tableName, limit]);
@@ -1199,8 +1246,13 @@ export class Ddb {
    * procedure the active contract declares `"read_only": true` is accepted; `args` are bound, never
    * interpolated. Anonymous, so the node refuses it for a reader-role contract like select/query.
    */
-  callReadProcedure(schemaName: string, procedure: string, args: string[] = []): Promise<DdbRow[]> {
-    return this.call('ddb_callReadProcedure', [schemaName, procedure, args]);
+  callReadProcedure(
+    schemaName: string, procedure: string, args: string[] = [], consistency?: DdbReadConsistency,
+  ): Promise<DdbRow[]> {
+    // The token is a fourth parameter only when given, so an old node sees exactly the call it always did.
+    const params: unknown[] = [schemaName, procedure, args];
+    if (consistency) params.push(consistency);
+    return this.call('ddb_callReadProcedure', params);
   }
 
   /**
@@ -1291,6 +1343,31 @@ export class Ddb {
       }
       await new Promise((r) => setTimeout(r, interval));
     }
+  }
+
+  /**
+   * The DECIDE-04 write outcome (DB-03): resolves once the write is COMMITTED -- applied and durable in
+   * the answering node's Postgres -- with finality reported separately and the read token to pass as
+   * `minVersion`. Throws on SKIPPED (never ack-then-reject) and on timeout (not committed as far as
+   * this node can say; resolve it later by the same hash).
+   *
+   * "Durable to policy" today is durable on the answering node: the node exposes no cross-replica
+   * durability signal yet, and every node holds every database (R = N) until PLACE-01..03.
+   */
+  async waitForCommitted(
+    txHash: string, opts: { intervalMs?: number; timeoutMs?: number } = {},
+  ): Promise<DdbWriteOutcome> {
+    const status = await this.waitForCommit(txHash, { ...opts, requireDurable: true });
+    const token = status.readToken ?? status.blockNumber;
+    if (!token) {
+      throw new Error(`DDB commit ${txHash} is durable but the node reported no read token (${JSON.stringify(status)})`);
+    }
+    return {
+      committed: true,
+      readToken: token,
+      finality: { finalized: status.status === 'applied' && status.blockNumber !== undefined, blockNumber: status.blockNumber },
+      status,
+    };
   }
 
   /** Dual-consensus stats. */
