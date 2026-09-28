@@ -2,7 +2,7 @@
 // with finality as a separate signal and hands back the read token; the read methods pass the token
 // through to the node unchanged, and an old call that passes none sends exactly what it always did.
 // No live node -- provider.send is mocked.
-import { Ddb, DDB_READ_DEADLINE_CODE, DDB_READ_UNAVAILABLE_CODE } from '../src/ddb';
+import { Ddb, DDB_READ_DEADLINE_CODE, DDB_READ_UNAVAILABLE_CODE, ddbReadTokenHex } from '../src/ddb';
 
 function mock(responses: Record<string, any[]>) {
   const sent: { method: string; params: any[] }[] = [];
@@ -57,5 +57,16 @@ describe('DB-03 write outcome and read token', () => {
   it('exports the node refusal codes', () => {
     expect(DDB_READ_DEADLINE_CODE).toBe(-32061);
     expect(DDB_READ_UNAVAILABLE_CODE).toBe(-32062);
+  });
+});
+
+describe('DB-03 read token spelling', () => {
+  it('sends hex whatever spelling the caller holds (the Provider hands results back as decimal)', async () => {
+    const { ddb, sent } = mock({ ddb_select: [[]] });
+    await ddb.select('s', 't', { minVersion: '6' });
+    await ddb.select('s', 't', { minVersion: 6 });
+    await ddb.select('s', 't', { minVersion: '0x0A' });
+    expect(sent.map((x) => x.params[2].minVersion)).toEqual(['0x6', '0x6', '0xa']);
+    expect(() => ddbReadTokenHex('latest')).toThrow(/not a block number/);
   });
 });

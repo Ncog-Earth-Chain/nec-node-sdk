@@ -27,14 +27,14 @@ export interface DdbQueryOptions {
    * or refuses with {@link DDB_READ_DEADLINE_CODE} after `waitMs`; it never returns older rows as success.
    * Omit it for today's behaviour (the ingress node's local state, no wait).
    */
-  minVersion?: string;
+  minVersion?: string | number;
   /** How long the node may wait for `minVersion` (ms). 0/omitted = node default (5 s); capped at 30 s. */
   waitMs?: number;
 }
 
 /** DB-03 read token alone, for ddb_callReadProcedure's optional fourth parameter. */
 export interface DdbReadConsistency {
-  minVersion?: string;
+  minVersion?: string | number;
   waitMs?: number;
 }
 
@@ -42,6 +42,23 @@ export interface DdbReadConsistency {
 export const DDB_READ_DEADLINE_CODE = -32061;
 /** JSON-RPC code of a read the node refused because it cannot report its applied version at all. */
 export const DDB_READ_UNAVAILABLE_CODE = -32062;
+
+/**
+ * The node parses `minVersion` as a 0x-hex quantity, but the Provider normalizes hex quantities in every
+ * RESULT to decimal strings -- so the readToken a caller got back from getCommitStatus arrives as "6", not
+ * "0x6". Accept either spelling (or a number / bigint) and send hex, so a token round-trips untouched.
+ */
+export function ddbReadTokenHex(v: string | number | bigint): string {
+  const s = typeof v === 'string' ? v.trim() : v;
+  if (typeof s === 'string' && /^0x[0-9a-f]+$/i.test(s)) return '0x' + BigInt(s).toString(16);
+  if (typeof s === 'string' && !/^[0-9]+$/.test(s)) throw new Error(`DDB read token ${JSON.stringify(v)} is not a block number`);
+  return '0x' + BigInt(s).toString(16);
+}
+
+function withReadToken<T extends { minVersion?: string | number | bigint }>(opts: T): T {
+  if (opts == null || opts.minVersion === undefined || opts.minVersion === null) return opts;
+  return { ...opts, minVersion: ddbReadTokenHex(opts.minVersion) };
+}
 
 /** ddb_selectVersioned result: the rows and the applied version they reflect at least. */
 export interface DdbVersionedRows {
@@ -1200,7 +1217,7 @@ export class Ddb {
 
   /** Select rows with optional filters / ordering / pagination. `schemaName` = derived db_name (Ddb.deriveDbName). */
   select(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbRow[]> {
-    return this.call('ddb_select', [schemaName, tableName, opts]);
+    return this.call('ddb_select', [schemaName, tableName, withReadToken(opts)]);
   }
 
   /**
@@ -1208,7 +1225,7 @@ export class Ddb {
    * Takes the same `minVersion`/`waitMs` token as select.
    */
   selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows> {
-    return this.call('ddb_selectVersioned', [schemaName, tableName, opts]);
+    return this.call('ddb_selectVersioned', [schemaName, tableName, withReadToken(opts)]);
   }
 
   /** Simple row fetch (up to `limit` rows). `schemaName` is the derived db_name (Ddb.deriveDbName). */
@@ -1238,7 +1255,7 @@ export class Ddb {
     );
     const sig = await s.signDdbHash(prepared.hash);
     const envelope: DdbSignedReadEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
-    return this.call('ddb_signedSelect', [envelope, query]);
+    return this.call('ddb_signedSelect', [envelope, withReadToken(query as DdbQueryOptions)]);
   }
 
   /**
@@ -1251,7 +1268,7 @@ export class Ddb {
   ): Promise<DdbRow[]> {
     // The token is a fourth parameter only when given, so an old node sees exactly the call it always did.
     const params: unknown[] = [schemaName, procedure, args];
-    if (consistency) params.push(consistency);
+    if (consistency) params.push(withReadToken(consistency));
     return this.call('ddb_callReadProcedure', params);
   }
 
