@@ -275,7 +275,7 @@ describe('the bytes that actually reach the node', () => {
 
     const sent: any[] = [];
     const provider: any = {
-      send: (_method: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0xc0ffee'); },
+      send: (_method: string, params: any[]) => { if (_method !== 'nec_rules') sent.push(params[0]); return Promise.resolve('0xc0ffee'); },
     };
 
     const schemaName = 'c_0000000000000000000000000000000000abcdef';
@@ -391,7 +391,7 @@ describe('contract retirement (deleteSchemaSigned)', () => {
   it('submits op type "deleteschema" as byte 2', async () => {
     const { skHex } = await fixedKey();
     const sent: any[] = [];
-    const provider: any = { send: (_m: string, p: any[]) => { sent.push(p[0]); return Promise.resolve('0xc0ffee'); } };
+    const provider: any = { send: (_m: string, p: any[]) => { if (_m !== 'nec_rules') sent.push(p[0]); return Promise.resolve('0xc0ffee'); } };
     const schemaName = 'c_0000000000000000000000000000000000abcdef';
     const opts = { timestamp: 1700000000, gasLimit: 100000, nonce: 3 };
 

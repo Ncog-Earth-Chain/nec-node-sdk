@@ -213,11 +213,14 @@ describe('Ddb: the v2 wire path', () => {
     expect(env.keyVersion).toBe('0x3');
   });
 
-  it('a default Ddb still signs v1 and never asks for the chain id', async () => {
+  // The default is 'auto' (GOV-06): it asks nec_rules, and a node that does not report v2 active --
+  // this mock answers nec_rules with a bare string, like a node without the method -- gets v1.
+  it('a default Ddb still signs v1 on a network without v2 active and never asks for the chain id', async () => {
     const { calls, provider } = mock();
     const { expiry, keyVersion, ...v1opts } = opts;
     await new Ddb(provider).submitOperationSigned(signer, 'callprocedure', FIX.schemaName, FIX.dataText, v1opts);
-    expect(calls.map((c) => c[0])).toEqual(['ddb_submitSignedOp']);
+    expect(calls.map((c) => c[0])).toEqual(['nec_rules', 'ddb_submitSignedOp']);
+    calls.shift();
     expect(calls[0][1][0].callerSig).toBe('0x' + hex(canonicalDdbOperationHash(
       7, FIX.schemaName, utf8(FIX.dataText), FIX.from, FIX.timestamp, FIX.gasLimit, FIX.nonce)));
     expect(calls[0][1][0]).not.toHaveProperty('expiry');
