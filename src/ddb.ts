@@ -32,7 +32,10 @@ export interface DdbQueryOptions {
   waitMs?: number;
 }
 
-/** DB-03 read token alone, for ddb_callReadProcedure's optional fourth parameter. */
+/**
+ * DB-03 read token alone: ddb_query's and ddb_callReadProcedure's optional fourth parameter, and
+ * ddb_signedCallReadProcedure's optional second one (beside the envelope, NOT signed -- NEC-152).
+ */
 export interface DdbReadConsistency {
   minVersion?: string | number;
   waitMs?: number;
@@ -1499,9 +1502,15 @@ export class Ddb {
     return this.call('ddb_selectVersioned', [schemaName, tableName, withReadToken(opts)]);
   }
 
-  /** Simple row fetch (up to `limit` rows). `schemaName` is the derived db_name (Ddb.deriveDbName). */
-  query(schemaName: string, tableName: string, limit = 100): Promise<DdbRow[]> {
-    return this.call('ddb_query', [schemaName, tableName, limit]);
+  /**
+   * Simple row fetch (up to `limit` rows). `schemaName` is the derived db_name (Ddb.deriveDbName).
+   * `consistency` is the DB-03 read token, as on callReadProcedure (NEC-152).
+   */
+  query(schemaName: string, tableName: string, limit = 100, consistency?: DdbReadConsistency): Promise<DdbRow[]> {
+    // The token is a fourth parameter only when given, so an old node sees exactly the call it always did.
+    const params: unknown[] = [schemaName, tableName, limit];
+    if (consistency) params.push(withReadToken(consistency));
+    return this.call('ddb_query', params);
   }
 
   /**
@@ -1550,7 +1559,9 @@ export class Ddb {
    * reader role, BEFORE the procedure runs.
    *
    * Signed: chain id, schema, procedure, every arg (in order), from, timestamp, nonce -- the whole call.
-   * Each signed call is single use.
+   * Each signed call is single use. NOT signed: `consistency`, the DB-03 read token (NEC-152), which
+   * travels as a second parameter beside the envelope; it only makes the node wait for, or refuse, a read
+   * the signature already authorizes, so the signed bytes are the same with or without it.
    */
   async signedCallReadProcedure(
     signer: DdbSignerLike,
@@ -1558,6 +1569,7 @@ export class Ddb {
     procedure: string,
     args: string[] = [],
     opts: DdbSignedReadProcedureOptions = {},
+    consistency?: DdbReadConsistency,
   ): Promise<DdbRow[]> {
     const s = toDdbSigner(signer);
     const chainId = opts.chainId ?? (await this.call('eth_chainId'));
@@ -1566,7 +1578,9 @@ export class Ddb {
     );
     const sig = await s.signDdbHash(prepared.hash);
     const envelope: DdbSignedReadProcedureEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
-    return this.call('ddb_signedCallReadProcedure', [envelope]);
+    const params: unknown[] = [envelope];
+    if (consistency) params.push(withReadToken(consistency));
+    return this.call('ddb_signedCallReadProcedure', params);
   }
 
   // ---------------------------------------------------------------------------
