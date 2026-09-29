@@ -148,4 +148,25 @@ describe('Ddb.signedCallReadProcedure', () => {
     expect(calls.map((c) => c.method)).toEqual(['ddb_signedCallReadProcedure']);
     expect(calls[0].params[0].args).toBeUndefined();
   });
+
+  // DB-03 (NEC-152): the read token is a transport option BESIDE the signed envelope, never inside it --
+  // the same signed bytes (this file's golden vector) are sent with or without it.
+  it('sends the read token as a second parameter only when given, outside the signed bytes', async () => {
+    const { skHex, pub } = await deterministicKey();
+    const m = await mldsa();
+    const calls: { method: string; params: any[] }[] = [];
+    const ddb = new Ddb(recordingProvider(calls));
+    const opts = { chainId: CHAIN_ID, timestamp: TS, nonce: NONCE };
+    await ddb.signedCallReadProcedure(skHex, SCHEMA, PROCEDURE, ARGS, opts);
+    await ddb.signedCallReadProcedure(skHex, SCHEMA, PROCEDURE, ARGS, opts, { minVersion: '6', waitMs: 250 });
+    expect(calls[0].params.length).toBe(1);
+    expect(calls[1].params.length).toBe(2);
+    expect(calls[1].params[1]).toEqual({ minVersion: '0x6', waitMs: 250 });
+    const strip = ({ callerSig, ...rest }: any) => rest;
+    expect(strip(calls[1].params[0])).toEqual(strip(calls[0].params[0]));
+    expect(calls[1].params[0]).not.toHaveProperty('minVersion');
+    const from = await privateKeyDdbSigner(skHex).getAddress();
+    const sig = Buffer.from(calls[1].params[0].callerSig.slice(2), 'hex');
+    expect(m.verify(pub, canonicalDdbSignedReadProcedureHash(CHAIN_ID, SCHEMA, PROCEDURE, ARGS, from, TS, NONCE), sig)).toBe(true);
+  });
 });

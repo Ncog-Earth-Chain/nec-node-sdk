@@ -54,6 +54,14 @@ describe('DB-03 write outcome and read token', () => {
     expect(sent[1].params).toEqual(['s', 'p', ['1'], { minVersion: '0xa', waitMs: 100 }]);
   });
 
+  it('query sends the token as a fourth parameter only when given (NEC-152)', async () => {
+    const { ddb, sent } = mock({ ddb_query: [[]] });
+    await ddb.query('s', 't');
+    await ddb.query('s', 't', 10, { minVersion: 6, waitMs: 100 });
+    expect(sent[0].params).toEqual(['s', 't', 100]);
+    expect(sent[1].params).toEqual(['s', 't', 10, { minVersion: '0x6', waitMs: 100 }]);
+  });
+
   it('exports the node refusal codes', () => {
     expect(DDB_READ_DEADLINE_CODE).toBe(-32061);
     expect(DDB_READ_UNAVAILABLE_CODE).toBe(-32062);
