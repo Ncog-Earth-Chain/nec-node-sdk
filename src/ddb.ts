@@ -85,15 +85,18 @@ export interface DdbSignOptions {
    */
   nonce?: number | bigint;
   /**
-   * Which operation preimage to sign: 1 ("NEC-DDB-OP\x01", the default) or 2 ("NEC-DDB-OP\x02", SEC-03).
+   * Which operation preimage to sign: 1 ("NEC-DDB-OP\x01"), 2 ("NEC-DDB-OP\x02", SEC-03), or 'auto'.
    *
    * v2 binds the chain id, the database identity, `expiry` and `keyVersion`. It is valid ONLY on a
-   * network where FeatureDdbOpPreimageV2 is active; a v1 network refuses a v2 signature and vice versa,
-   * and the node reports its rules over no RPC, so the SDK cannot find out for itself. It therefore
-   * never switches on its own: set this (or `new Ddb(provider, { opPreimageVersion: 2 })`) once the
-   * network you target has activated the feature.
+   * network where FeatureDdbOpPreimageV2 is active; a v1 network refuses a v2 signature and vice versa.
+   *
+   * 'auto' (the Ddb default, GOV-06) asks the node's nec_rules and signs v2 only when it reports
+   * ddb-op-preimage-v2 ACTIVE in the current epoch -- a feature merely SCHEDULED is still v1. A node
+   * without nec_rules, or any error reading it, gives v1, which is what the SDK signed before 'auto'
+   * existed. 'auto' needs a node, so buildDdbOp (offline) refuses it; resolve it first with
+   * Ddb.resolveOpPreimageVersion().
    */
-  preimageVersion?: DdbOpPreimageVersion;
+  preimageVersion?: DdbOpPreimageMode;
   /** v2 only. The network the operation is bound to. Ddb asks the node (eth_chainId); buildDdbOp requires it. */
   chainId?: number | bigint | string;
   /**
@@ -108,10 +111,16 @@ export interface DdbSignOptions {
 /** The DDB operation preimage versions this SDK can sign. */
 export type DdbOpPreimageVersion = 1 | 2;
 
+/** A preimage version, or 'auto': ask the node (nec_rules) which one its current epoch verifies. */
+export type DdbOpPreimageMode = DdbOpPreimageVersion | 'auto';
+
+/** The FeatureID nec_rules reports the v2 preimage under (ncogearthchain.FeatureDdbOpPreimageV2). */
+export const DDB_OP_PREIMAGE_V2_FEATURE = 'ddb-op-preimage-v2';
+
 /** Client-wide defaults for a {@link Ddb}. */
 export interface DdbOptions {
-  /** The preimage every signed write uses unless the call says otherwise. Defaults to 1. See DdbSignOptions. */
-  opPreimageVersion?: DdbOpPreimageVersion;
+  /** The preimage every signed write uses unless the call says otherwise. Defaults to 'auto'. See DdbSignOptions. */
+  opPreimageVersion?: DdbOpPreimageMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +941,10 @@ export function buildDdbOp(
   };
 
   const version = opts.preimageVersion ?? 1;
+  if (version === 'auto') {
+    throw new Error("buildDdbOp is offline and cannot resolve preimageVersion 'auto': pass 1 or 2 " +
+      '(Ddb.resolveOpPreimageVersion() asks the node)');
+  }
   if (version === 1) {
     // v1 signs neither field. Sending one anyway would put an UNSIGNED value on the envelope that a
     // v2 node reads as signed -- refuse it rather than drop it silently.
@@ -1147,10 +1160,38 @@ export function buildDdbSignedReadProcedure(
  */
 export class Ddb {
   /**
-   * `options.opPreimageVersion` picks the operation preimage every signed write uses (default 1). Set it
-   * to 2 only for a network where FeatureDdbOpPreimageV2 is active; see DdbSignOptions.preimageVersion.
+   * `options.opPreimageVersion` picks the operation preimage every signed write uses (default 'auto':
+   * v2 exactly when the node reports FeatureDdbOpPreimageV2 active); see DdbSignOptions.preimageVersion.
    */
   constructor(private readonly provider: Provider, private readonly options: DdbOptions = {}) {}
+
+  // Set once nec_rules has reported v2 active. Activation is monotonic -- applyActivations only ever
+  // turns a flag ON -- so v2 is remembered; v1 is not, so the first write after the activation epoch
+  // switches without a restart.
+  private v2Active = false;
+
+  /**
+   * Resolve 'auto' to the preimage version the node's current epoch verifies: 2 when nec_rules reports
+   * ddb-op-preimage-v2 `active`, else 1. A node without nec_rules (an older node), a malformed answer, or
+   * any error gives 1 -- the pre-'auto' behaviour -- so 'auto' never fails a write v1 would have sent.
+   * An explicit 1 or 2 is returned as-is without a request. Exposed for a wallet that builds its own op.
+   */
+  async resolveOpPreimageVersion(mode: DdbOpPreimageMode = 'auto'): Promise<DdbOpPreimageVersion> {
+    if (mode !== 'auto') return mode;
+    if (this.v2Active) return 2;
+    try {
+      const rules = await this.call('nec_rules');
+      // `active`, never `scheduled`: a scheduled activation whose epoch has not arrived is still v1 on
+      // every node, and signing v2 early gets every operation refused.
+      if (rules?.features?.[DDB_OP_PREIMAGE_V2_FEATURE]?.active === true) {
+        this.v2Active = true;
+        return 2;
+      }
+    } catch {
+      // No nec_rules (method not found on an older node) or a transport error: v1, as before.
+    }
+    return 1;
+  }
 
   /**
    * Derive the schema (db_name) a contract's tables / procedures / roles live under, mirroring the
@@ -1227,9 +1268,10 @@ export class Ddb {
 
     // buildDdbOp does the compaction, the timestamp/gasLimit defaults and the fresh nonce, so the
     // raw-key path and the wallet path cannot drift: both submit bytes produced by the same function.
-    // The preimage version: the call's, else this client's, else v1. Under v2 the chain id is signed,
-    // so it comes from the node (eth_chainId) unless the caller pinned one.
-    const preimageVersion = opts.preimageVersion ?? this.options.opPreimageVersion ?? 1;
+    // The preimage version: the call's, else this client's, else 'auto' (resolved against nec_rules).
+    // Under v2 the chain id is signed, so it comes from the node (eth_chainId) unless the caller pinned one.
+    const preimageVersion = await this.resolveOpPreimageVersion(
+      opts.preimageVersion ?? this.options.opPreimageVersion ?? 'auto');
     const chainId = preimageVersion === 2 ? (opts.chainId ?? (await this.call('eth_chainId'))) : opts.chainId;
     const prepared = buildDdbOp(typeName, schemaName, data, from, pub, { ...opts, preimageVersion, chainId });
 

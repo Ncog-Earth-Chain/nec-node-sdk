@@ -21,7 +21,7 @@ async function deterministicKey() {
 }
 
 function capturingProvider(sent: any[]) {
-  return { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } } as any;
+  return { send: (_m: string, params: any[]) => { if (_m !== 'nec_rules') sent.push(params[0]); return Promise.resolve('0x'); } } as any;
 }
 
 describe('DDB signing through a wallet-shaped signer', () => {

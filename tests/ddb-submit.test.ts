@@ -21,7 +21,7 @@ describe('DDB signed-op submit envelope', () => {
   it('builds the exact ddb_submitSignedOp envelope and returns the requestId', async () => {
     const { skHex, pub } = await deterministicKey();
     const sent: any[] = [];
-    const provider: any = { send: (method: string, params: any[]) => { sent.push({ method, params }); return Promise.resolve('0xnode-op-hash'); } };
+    const provider: any = { send: (method: string, params: any[]) => { if (method !== 'nec_rules') sent.push({ method, params }); return Promise.resolve('0xnode-op-hash'); } };
     const ddb = new Ddb(provider);
 
     const schemaName = 'c_0000000000000000000000000000000000abcdef';
@@ -67,7 +67,7 @@ describe('DDB signed-op submit envelope', () => {
   it('uses a FRESH random nonce per submission when none is given', async () => {
     const { skHex } = await deterministicKey();
     const sent: any[] = [];
-    const provider: any = { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } };
+    const provider: any = { send: (_m: string, params: any[]) => { if (_m !== 'nec_rules') sent.push(params[0]); return Promise.resolve('0x'); } };
     const ddb = new Ddb(provider);
     // Same operation, same timestamp: without a fresh nonce these two envelopes would be byte-identical,
     // which is exactly what made a replay indistinguishable from the original.
@@ -104,7 +104,7 @@ describe('DDB contract upgrade (updateSchemaSigned)', () => {
   it('submits op type "updateschema" with the full new definition', async () => {
     const { skHex } = await deterministicKey();
     const sent: any[] = [];
-    const provider: any = { send: (_m: string, params: any[]) => { sent.push(params[0]); return Promise.resolve('0x'); } };
+    const provider: any = { send: (_m: string, params: any[]) => { if (_m !== 'nec_rules') sent.push(params[0]); return Promise.resolve('0x'); } };
     const ddb = new Ddb(provider);
 
     const schema = 'c_0000000000000000000000000000000000abcdef';
