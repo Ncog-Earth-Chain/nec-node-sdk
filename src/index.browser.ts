@@ -63,3 +63,5 @@ export { loadWasm, loadWasmFromBuffer, type MlKemBrowser } from './webassembly/m
 
 // Re-export browser interface as the main MLKEM type
 export type { MlKemBrowser as MlKem } from './webassembly/mlkem-browser'; 
+// PRIV-02 (NEC-84): client-side envelope for CONFIDENTIAL columns + recipient-key directory digests.
+export * as confidential from './confidential';

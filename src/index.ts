@@ -61,3 +61,5 @@ export { ContractFactory } from './contract-factory';
 export { loadWasm, loadWasmFromBuffer, type MlKem } from './webassembly/mlkem';
 export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther, formatUnits, hexToNec, necToHex, weiToNec, serializeForRpc, normalizeResponse, isValidAddress, decimalToWei, kyberPrivateKeyToEncryptedPublicKeyAddress, generateMLDSAKeyPair, mldsaPublicKeyToAddress, mldsaPrivateKeyToPublicKey, signPersonalMessageMLDSA, verifyPersonalMessageMLDSA, personalTextHash } from './utils';
 export { getAllTransactions, getAllTokens } from './graphql';
+// PRIV-02 (NEC-84): client-side envelope for CONFIDENTIAL columns + recipient-key directory digests.
+export * as confidential from './confidential';
