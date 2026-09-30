@@ -697,3 +697,11 @@ console.log(out.id, out.readToken, out.attempts);
 ```
 
 After a disconnect, each member's operation hash (`operationHashes`) resolves the whole transaction's outcome through `ddb_getOperationStatus`.
+
+### 9.1 Routing a contract's predicate writes (SEC-12b)
+
+Once `ddb-recomputable-anchor` is active, every validator recomputes each contract's anchored state hash from the attested write-sets. A **predicate** (general-lane) write must then link on the anchor its leader last saw applied. Two predicate writes to the **same contract** submitted through **different** validators at the same moment can race: the later one is skipped as `state_chain_break`. The skip is retryable and nothing is lost, but it costs a round.
+
+- **Send one contract's predicate writes through one node** (one `Ddb` instance / one RPC endpoint) where you can.
+- Point writes (row-lock procedures) are unaffected. Batching several operations into one transaction or batch also avoids the race.
+- Treat `state_chain_break` as retryable, as `runTransaction` already does (`isRetryableDdbTxnSkip`).
