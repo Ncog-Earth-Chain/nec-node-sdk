@@ -548,6 +548,103 @@ export function canonicalDdbRequestIdV2(op: DdbCanonicalOpV2, requester: string)
 }
 
 // ---------------------------------------------------------------------------
+// DB-01 transactions (NEC-77): gossip/ddb/txn.go, docs/design/ddb-transactions.md
+// ---------------------------------------------------------------------------
+
+// == Go txnDomain / txnMemberTag. A bump of either is a client break.
+const DDB_TXN_DOMAIN = new TextEncoder().encode('NEC-DDB-TXN\x01');
+const DDB_TXN_MEMBER_TAG = new TextEncoder().encode('NEC-DDB-TXN-MEMBER\x01');
+
+/** The node's per-transaction ceilings (gossip/ddb MaxDdbOpsPerBatch, MaxDdbTxnReads). Governance may only lower them. */
+export const DDB_TXN_MAX_OPS = 4;
+export const DDB_TXN_MAX_READS = 16;
+
+/**
+ * One entry of a transaction's read set. No `table` (and no `pk`) reads the WHOLE database: any write to
+ * it after the read version conflicts. Otherwise `table` plus the row's primary-key values, rendered as
+ * the node renders them (null for a NULL key part), name one row.
+ */
+export interface DdbTxnRead {
+  table?: string;
+  pk?: Array<string | null>;
+}
+
+/** A member's transaction header on the wire (inter.DdbTxn); only member 0 carries the read set. */
+export interface DdbTxnHeaderEnvelope {
+  id: string;
+  index: number;
+  count: number;
+  read_version?: number;
+  reads?: Array<{ table?: string; pk?: Array<{ String: string; Valid: boolean }> }>;
+}
+
+function ddbU32BE(n: number): Uint8Array {
+  if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) throw new Error(`not a uint32: ${n}`);
+  return Uint8Array.of((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+}
+
+// The node's static shape rules (checkTxnMembersStatic's count/read limits and checkTxnReads), so a client
+// learns a refusal before it spends a round.
+function ddbCheckTxnShape(nOps: number, reads: DdbTxnRead[]): void {
+  if (nOps < 1 || nOps > DDB_TXN_MAX_OPS) throw new Error(`a transaction carries 1..${DDB_TXN_MAX_OPS} operations, not ${nOps}`);
+  if (reads.length > DDB_TXN_MAX_READS) {
+    throw new Error(`a transaction's read set carries at most ${DDB_TXN_MAX_READS} entries, not ${reads.length}`);
+  }
+  reads.forEach((r, i) => {
+    const table = r.table ?? '';
+    const pk = r.pk ?? [];
+    if (table === '' && pk.length !== 0) throw new Error(`read ${i} names key values but no table`);
+    if (table !== '' && pk.length === 0) {
+      throw new Error(`read ${i} names table ${table} but no key values: read the whole database instead (no table)`);
+    }
+  });
+}
+
+/**
+ * A transaction's id -- Go txnCommitment under the v2 preimage:
+ *   keccak256( "NEC-DDB-TXN\x01" || u32BE(K) || u64BE(readVersion) || u32BE(len(reads)) ||
+ *              each read: lenPrefix(table) || u32BE(len(pk)) || each key part: valid(1B) || lenPrefix(value) ||
+ *              each member: keccak256(canonicalDdbOperationBytesV2(member)) )
+ * The members are hashed WITHOUT their headers (the header carries this id). Pinned against the node's
+ * TestTransactionVectors in tests/ddb-transaction.test.ts.
+ */
+export function canonicalDdbTxnId(members: DdbCanonicalOpV2[], readVersion: number | bigint, reads: DdbTxnRead[]): Uint8Array {
+  ddbCheckTxnShape(members.length, reads);
+  const enc = new TextEncoder();
+  const parts: Uint8Array[] = [
+    DDB_TXN_DOMAIN, ddbU32BE(members.length), ddbU64BE(ddbU64('readVersion', readVersion)), ddbU32BE(reads.length),
+  ];
+  for (const r of reads) {
+    const pk = r.pk ?? [];
+    parts.push(ddbLenPrefixed(enc.encode(r.table ?? '')), ddbU32BE(pk.length));
+    for (const v of pk) parts.push(Uint8Array.of(v === null ? 0 : 1), ddbLenPrefixed(enc.encode(v ?? '')));
+  }
+  for (const m of members) parts.push(canonicalDdbOperationHashV2(m));
+  return keccak_256(ddbConcat(...parts));
+}
+
+/**
+ * The 32 bytes a transaction member signs: its v2 preimage with the member header appended --
+ * canonicalDdbOperationBytesV2(op) || "NEC-DDB-TXN-MEMBER\x01" || id || u32BE(index) || u32BE(count)
+ * (Go appendTxnMember). The read set is not repeated here; the id binds it.
+ */
+export function canonicalDdbTxnMemberHash(op: DdbCanonicalOpV2, id: Uint8Array, index: number, count: number): Uint8Array {
+  if (id.length !== 32) throw new Error(`invalid transaction id length: ${id.length} (expected 32)`);
+  if (!(index >= 0 && index < count)) throw new Error(`member index ${index} is outside 0..${count - 1}`);
+  return keccak_256(ddbConcat(canonicalDdbOperationBytesV2(op), DDB_TXN_MEMBER_TAG, id, ddbU32BE(index), ddbU32BE(count)));
+}
+
+/**
+ * The skip reasons a transaction resolves by re-reading and resubmitting (Go IsRetryableTxnSkip):
+ * a read-set conflict, a read version older than the chain's recorded window, and the lost-update
+ * refusals its writes can hit.
+ */
+export function isRetryableDdbTxnSkip(reason: string | undefined): boolean {
+  return reason === 'txn_read_conflict' || reason === 'txn_read_too_old' ||
+    reason === 'row_lock_lost' || reason === 'state_chain_break';
+}
+
+// ---------------------------------------------------------------------------
 // Signed reads (ddb_signedSelect)
 // ---------------------------------------------------------------------------
 
@@ -881,6 +978,16 @@ export interface DdbWriteOutcome {
   status: DdbCommitStatus;
 }
 
+/** What a submitted DB-01 transaction gives you back. */
+export interface DdbTxnReceipt {
+  /** The transaction id every member signed (0x-hex). */
+  id: string;
+  /** The ONE commit transaction carrying every member. Feed it to getCommitStatus / waitForCommitted. */
+  commitTxHash: string;
+  /** Each member's signed operation hash; ddb_getOperationStatus resolves any of them after a disconnect. */
+  operationHashes: string[];
+}
+
 /** An operation prepared for signing: what to sign, and the envelope it becomes. */
 export interface DdbPreparedOp {
   /** The 32 bytes to sign. Sign AS-IS -- no EIP-191 prefix. */
@@ -985,6 +1092,103 @@ export function buildDdbOp(
     hash: canonicalDdbOperationHashV2(op),
     requestId: '0x' + ddbBytesToHex(canonicalDdbRequestIdV2(op, from)),
     envelope: { ...envelope, expiry: ddbU64Hex(expiry), keyVersion: ddbU64Hex(keyVersion) },
+  };
+}
+
+/** One member of a DB-01 transaction: an operation of the transaction's caller on its one database. */
+export interface DdbTxnMemberSpec {
+  typeName: DdbOpTypeName;
+  schemaName: string;
+  data: string | object;
+  /** Defaults to 100000, as for a single operation. */
+  gasLimit?: number;
+  /** Defaults to a fresh random nonce per member. */
+  nonce?: number | bigint;
+}
+
+/**
+ * Options for a transaction. `timestamp`, `expiry` and `keyVersion` are shared by every member; the
+ * chain id is required (Ddb fills it from eth_chainId). `readVersion` is the DB-03 read token the reads
+ * were taken at (a readToken / dataVersion, hex or number); `reads` is the read set checked against it.
+ */
+export interface DdbTxnOptions {
+  chainId?: number | bigint | string;
+  timestamp?: number;
+  expiry?: number | bigint;
+  keyVersion?: number | bigint;
+  readVersion?: number | bigint | string;
+  reads?: DdbTxnRead[];
+}
+
+/** A transaction member ready to sign: the hash to sign AS-IS, and its envelope (without callerSig). */
+export interface DdbPreparedTxnMember {
+  hash: Uint8Array;
+  envelope: Omit<DdbSignedOpEnvelope, 'callerSig'> & { txn: DdbTxnHeaderEnvelope };
+}
+
+/** A transaction ready to sign: its id and one prepared member per operation, in order. */
+export interface DdbPreparedTxn {
+  id: string;
+  members: DdbPreparedTxnMember[];
+}
+
+/**
+ * Build a DB-01 transaction ready to sign, without signing it (the StampTransaction the node runs for a
+ * local client, reimplemented). Transactions are signed under operation preimage v2 only. Sign every
+ * member's `hash`, then submit all members together with {@link Ddb.submitSignedTransaction}. The node
+ * applies them all or none, and only if no row in `reads` was written after `readVersion`.
+ */
+export function buildDdbTransaction(
+  members: DdbTxnMemberSpec[],
+  from: string,
+  callerPubKey: Uint8Array,
+  opts: DdbTxnOptions = {},
+): DdbPreparedTxn {
+  const reads = opts.reads ?? [];
+  ddbCheckTxnShape(members.length, reads);
+  const rv = ddbU64('readVersion', typeof opts.readVersion === 'string' ? BigInt(opts.readVersion) : (opts.readVersion ?? 0));
+  if (rv > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`DDB readVersion ${rv} does not fit the JSON number the node reads`);
+  const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000);
+  const built = members.map((m) => {
+    const p = buildDdbOp(m.typeName, m.schemaName, m.data, from, callerPubKey, {
+      preimageVersion: 2, chainId: opts.chainId, timestamp, expiry: opts.expiry, keyVersion: opts.keyVersion,
+      gasLimit: m.gasLimit, nonce: m.nonce,
+    });
+    const e = p.envelope;
+    const op: DdbCanonicalOpV2 = {
+      type: DDB_OP_TYPE[m.typeName], chainId: opts.chainId as number | bigint | string, schemaName: e.schemaName,
+      data: ddbHexToBytes(e.data), from, timestamp: BigInt(e.timestamp), gasLimit: BigInt(e.gasLimit),
+      nonce: BigInt(e.nonce), expiry: BigInt(e.expiry as string), keyVersion: BigInt(e.keyVersion as string),
+    };
+    return { op, envelope: e };
+  });
+  // The database each member writes, as the node resolves it (the derived db_name for a schema operation).
+  const db = (b: (typeof built)[number]) => ddbOpPreimageDbIdentity(b.op.type, b.op.schemaName, b.op.data);
+  built.forEach((b, i) => {
+    if (db(b) !== db(built[0])) {
+      throw new Error(`transaction member ${i} writes database ${db(b)}, member 0 writes ` +
+        `${db(built[0])}: a transaction is ONE database's (nothing is atomic across two databases)`);
+    }
+  });
+  const id = canonicalDdbTxnId(built.map((b) => b.op), rv, reads);
+  const idHex = '0x' + ddbBytesToHex(id);
+  return {
+    id: idHex,
+    members: built.map((b, i) => {
+      const txn: DdbTxnHeaderEnvelope = { id: idHex, index: i, count: built.length };
+      if (i === 0) {
+        if (rv !== BigInt(0)) txn.read_version = Number(rv);
+        if (reads.length) {
+          txn.reads = reads.map((r) => {
+            const w: { table?: string; pk?: Array<{ String: string; Valid: boolean }> } = {};
+            if (r.table) w.table = r.table;
+            if (r.pk && r.pk.length) w.pk = r.pk.map((v) => ({ String: v ?? '', Valid: v !== null }));
+            return w;
+          });
+        }
+      }
+      return { hash: canonicalDdbTxnMemberHash(b.op, id, i, built.length), envelope: { ...b.envelope, txn } };
+    }),
   };
 }
 
@@ -1309,6 +1513,86 @@ export class Ddb {
     const sig = typeof signature === 'string' ? signature : '0x' + ddbBytesToHex(signature);
     const commitTxHash = await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: sig }]);
     return { requestId: prepared.requestId, commitTxHash: typeof commitTxHash === 'string' ? commitTxHash : '' };
+  }
+
+  /**
+   * Sign a DB-01 transaction with `signer` and submit it via ddb_submitSignedTransaction: its members
+   * apply together in one commit, or none do. Transactions are signed under operation preimage v2, so
+   * this refuses on a network where ddb-op-preimage-v2 is not active yet. Returns the transaction id,
+   * the commit tx hash (feed it to waitForCommitted / getCommitStatus), and each member's signed hash.
+   * A skip whose reason passes {@link isRetryableDdbTxnSkip} means "re-read and try again"; use
+   * {@link runTransaction} to do that in a loop.
+   */
+  async submitTransactionSigned(
+    signerLike: DdbSignerLike,
+    members: DdbTxnMemberSpec[],
+    opts: DdbTxnOptions = {},
+  ): Promise<DdbTxnReceipt> {
+    const signer = toDdbSigner(signerLike);
+    const from = await signer.getAddress();
+    const pub = await signer.getPublicKey();
+    const version = await this.resolveOpPreimageVersion(this.options.opPreimageVersion ?? 'auto');
+    if (version !== 2) {
+      throw new Error('DDB transactions are signed under operation preimage v2, and this network does not verify v2 yet ' +
+        `(${DDB_OP_PREIMAGE_V2_FEATURE} is not active)`);
+    }
+    const chainId = opts.chainId ?? (await this.call('eth_chainId'));
+    const prepared = buildDdbTransaction(members, from, pub, { ...opts, chainId });
+    const sigs: Uint8Array[] = [];
+    for (const m of prepared.members) sigs.push(await signer.signDdbHash(m.hash));
+    return this.submitSignedTransaction(prepared, sigs);
+  }
+
+  /**
+   * Submit a transaction you signed elsewhere: pair with {@link buildDdbTransaction}, one signature per
+   * member, in member order.
+   */
+  async submitSignedTransaction(prepared: DdbPreparedTxn, signatures: Array<Uint8Array | string>): Promise<DdbTxnReceipt> {
+    if (signatures.length !== prepared.members.length) {
+      throw new Error(`${signatures.length} signatures for ${prepared.members.length} transaction members`);
+    }
+    const envelopes = prepared.members.map((m, i) => {
+      const sig = signatures[i];
+      return { ...m.envelope, callerSig: typeof sig === 'string' ? sig : '0x' + ddbBytesToHex(sig) };
+    });
+    const commitTxHash = await this.call('ddb_submitSignedTransaction', [envelopes]);
+    return {
+      id: prepared.id,
+      commitTxHash: typeof commitTxHash === 'string' ? commitTxHash : '',
+      operationHashes: prepared.members.map((m) => '0x' + ddbBytesToHex(m.hash)),
+    };
+  }
+
+  /**
+   * Run a transaction with retries (product contract C-02 / C-04). `attempt` is called once per try,
+   * with the try number from 1; it should (re)read what the transaction depends on and return the
+   * members plus the read version and read set. A commit skipped for a RETRYABLE reason
+   * ({@link isRetryableDdbTxnSkip}: a conflicting write after the read version, a read version too old,
+   * a lost row lock or a state-chain break) runs `attempt` again, up to `maxAttempts` (default 3). Any
+   * other skip throws at once. Resolves with the committed outcome (durable on the answering node).
+   */
+  async runTransaction(
+    signer: DdbSignerLike,
+    attempt: (n: number) => Promise<{ members: DdbTxnMemberSpec[]; readVersion?: number | bigint | string; reads?: DdbTxnRead[] }>,
+    opts: DdbTxnOptions & { maxAttempts?: number; intervalMs?: number; timeoutMs?: number } = {},
+  ): Promise<DdbWriteOutcome & { id: string; attempts: number }> {
+    const max = opts.maxAttempts ?? 3;
+    let lastReason = '';
+    for (let n = 1; n <= max; n++) {
+      const spec = await attempt(n);
+      const receipt = await this.submitTransactionSigned(signer, spec.members, {
+        ...opts, readVersion: spec.readVersion, reads: spec.reads,
+      });
+      try {
+        const outcome = await this.waitForCommitted(receipt.commitTxHash, { intervalMs: opts.intervalMs, timeoutMs: opts.timeoutMs });
+        return { ...outcome, id: receipt.id, attempts: n };
+      } catch (err) {
+        const status = await this.getCommitStatus(receipt.commitTxHash).catch(() => undefined);
+        if (status?.status !== 'skipped' || !isRetryableDdbTxnSkip(status.reason)) throw err;
+        lastReason = String(status.reason);
+      }
+    }
+    throw new Error(`DDB transaction still conflicting after ${max} attempts (last skip: ${lastReason})`);
   }
 
   /**

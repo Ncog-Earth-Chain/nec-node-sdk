@@ -659,3 +659,41 @@ console.log(rows); // [{ account: 'alice', balance: '100' }]
 ```
 
 See the runnable examples in `examples/ddb-deploy-pointwrite.ts` and `examples/ddb-procedure.ts`.
+
+---
+
+## 9. Transactions (DB-01)
+
+A DDB transaction is an **atomic batch**: up to 4 operations by **one caller** on **one database**, committed in ONE commit transaction that applies all of them or none. It can carry a **read set**: rows (or the whole database) the transaction read at a **read version**, which is a DB-03 read token such as the `readToken` from `waitForCommitted` or the `dataVersion` from a versioned read. If any row in the read set was written after that version, block validity refuses the whole transaction as a **retryable conflict**.
+
+There are no interactive `begin`/`commit` sessions. Read first, then submit the writes together with what you read.
+
+Transactions are signed under operation preimage **v2** only, so `submitTransactionSigned` refuses on a network where `ddb-op-preimage-v2` is not active. On the network they also need `ddb-transactions` active. Until then the node skips a transaction commit rather than forking.
+
+| Function | What it does |
+| --- | --- |
+| `ddb.submitTransactionSigned(signer, members, opts?)` | Signs every member and submits them via `ddb_submitSignedTransaction`. Returns `{ id, commitTxHash, operationHashes }`. |
+| `ddb.runTransaction(signer, attempt, opts?)` | Calls `attempt(n)` to (re)read and return `{ members, readVersion, reads }`, submits, and waits for the commit. It retries on a retryable skip, up to `maxAttempts` (default 3), and throws on any other skip. |
+| `buildDdbTransaction(members, from, callerPubKey, opts)` | Offline builder: the id plus one `{ hash, envelope }` per member, for a signer outside the SDK. Submit the signed result with `ddb.submitSignedTransaction(prepared, signatures)`. |
+| `isRetryableDdbTxnSkip(reason)` | Returns true for `txn_read_conflict`, `txn_read_too_old`, `row_lock_lost` and `state_chain_break`. |
+| `canonicalDdbTxnId`, `canonicalDdbTxnMemberHash` | The exact hashes the node verifies, pinned to the node's vectors. |
+
+Read-set rules: a row read names `table` plus its primary-key values (use `null` for a NULL key part). A read with no `table` covers the whole database. Any general-lane (non-point) write to the database after the read version conflicts with every read.
+
+```ts
+const out = await ddb.runTransaction(PRIVATE_KEY, async () => {
+  const { rows, dataVersion } = await ddb.selectVersioned(dbName, 'balances', { filters: [{ column: 'account', op: '=', value: 'alice' }] });
+  if (Number(rows[0].balance) < 10) throw new Error('insufficient funds');
+  return {
+    readVersion: dataVersion,
+    reads: [{ table: 'balances', pk: ['alice'] }],
+    members: [
+      { typeName: 'callprocedure', schemaName: dbName, data: { procedure: 'debit', args: ['alice', '10'] } },
+      { typeName: 'callprocedure', schemaName: dbName, data: { procedure: 'credit', args: ['bob', '10'] } },
+    ],
+  };
+});
+console.log(out.id, out.readToken, out.attempts);
+```
+
+After a disconnect, each member's operation hash (`operationHashes`) resolves the whole transaction's outcome through `ddb_getOperationStatus`.
