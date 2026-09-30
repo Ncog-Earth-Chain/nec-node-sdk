@@ -21,6 +21,11 @@ export {
   type DdbFilter, type DdbFilterOp, type DdbQueryOptions, type DdbSignOptions,
   type DdbRow, type DdbSchemaInfo, type DdbEndorsementStatus, type DdbConsensusStats,
   type DdbValidatorSet, type DdbStorageStats,
+  // DB-01 transactions (NEC-77): one caller's atomic batch on one database, with a read set.
+  buildDdbTransaction, canonicalDdbTxnId, canonicalDdbTxnMemberHash, isRetryableDdbTxnSkip,
+  DDB_TXN_MAX_OPS, DDB_TXN_MAX_READS,
+  type DdbTxnRead, type DdbTxnMemberSpec, type DdbTxnOptions, type DdbPreparedTxn, type DdbPreparedTxnMember,
+  type DdbTxnHeaderEnvelope, type DdbTxnReceipt,
 } from './ddb';
 // Typed DDB contract definitions + the point-op (row-lock) declaration, and build-time eligibility validation.
 export {
