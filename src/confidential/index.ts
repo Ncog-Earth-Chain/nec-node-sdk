@@ -44,7 +44,7 @@ const GRANTREF = enc.encode('NEC-PRIV02-GRANTREF\x01');
 /** Error codes match the vector file's names (and the Go errors). */
 export type ConfidentialErrorCode =
   | 'format' | 'unsupported' | 'auth' | 'stale' | 'unknownEpoch' | 'nonceBudget'
-  | 'cellVersion' | 'unwrap' | 'notForThisKey' | 'keyCommitment' | 'notAGrantMember' | 'backup';
+  | 'cellVersion' | 'cellClear' | 'unwrap' | 'notForThisKey' | 'keyCommitment' | 'notAGrantMember' | 'backup';
 
 export class ConfidentialError extends Error {
   constructor(public readonly code: ConfidentialErrorCode, message?: string) {
@@ -213,6 +213,42 @@ export function nextCellVersion(current?: Uint8Array): bigint {
 /** The keyless write-side rule a procedure applies. Throws on violation. */
 export function checkSuccessor(current: Uint8Array | undefined, next: Uint8Array): void {
   if (parseHeader(next).cellVersion !== nextCellVersion(current)) throw new ConfidentialError('cellVersion');
+}
+
+/**
+ * The node's guard on a procedure write to a CONFIDENTIAL cell (PRIV-02b, NEC-162), on the cell's current and
+ * next stored values (null/undefined = SQL NULL): an unchanged cell passes; clearing an envelope throws
+ * 'cellClear' (the next write would restart at cellVersion 1); anything else must be checkSuccessor's exact
+ * successor. Run it on the value you read before submitting, to learn whether the write will be endorsed.
+ */
+export function checkCellWrite(current: Uint8Array | null | undefined, next: Uint8Array | null | undefined): void {
+  const cur = current ?? undefined;
+  if (cur !== undefined && next != null && cur.length === next.length && cur.every((b, i) => b === next[i])) return;
+  if (next == null) {
+    if (cur === undefined) return;
+    throw new ConfidentialError('cellClear');
+  }
+  checkSuccessor(cur, next);
+}
+
+/** Contract-metadata key under which a data contract declares its CONFIDENTIAL columns (PRIV-02b). */
+export const CONFIDENTIAL_COLUMNS_METADATA_KEY = 'confidential_columns';
+
+/**
+ * Returns a copy of a contract's metadata with its CONFIDENTIAL columns declared ({ table: [columns] }).
+ * The node then refuses, at deploy, a declared column that is not BYTEA, is keyed, constrained or indexed, or
+ * a contract with a mutating procedure that has no point_write; and at every call, a write whose envelope is
+ * not the cell's next cellVersion (checkCellWrite).
+ */
+export function declareConfidentialColumns(
+  metadata: Record<string, unknown> | undefined, columns: Record<string, string[]>,
+): Record<string, unknown> {
+  for (const [t, cols] of Object.entries(columns)) {
+    if (cols.length === 0 || new Set(cols).size !== cols.length) {
+      throw new Error(`confidential: table ${t} must list distinct columns`);
+    }
+  }
+  return { ...(metadata ?? {}), [CONFIDENTIAL_COLUMNS_METADATA_KEY]: columns };
 }
 
 /** Seals value for cell at cellVersion under epoch e. `nonce` is for the golden vectors only. */
