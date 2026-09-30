@@ -6,7 +6,8 @@ import * as path from 'path';
 import { keyFromSeed, encapsulate, decapsulate } from '../src/confidential/mlkem1024';
 import {
   identityFromAccountSeed, recipientKeyFromSeed, newRecipientKey, newGrant, acceptGrant, encodeGrant, decodeGrant,
-  slotContext, commitment, seal, open, columnKey, cellAad, checkSuccessor, restoreKeystore, backupKeystore,
+  slotContext, commitment, seal, open, columnKey, cellAad, checkSuccessor, checkCellWrite, declareConfidentialColumns,
+  CONFIDENTIAL_COLUMNS_METADATA_KEY, restoreKeystore, backupKeystore,
   identityDigest, lastResortDigest, poolDigest, grantRef, ConfidentialError, Cell, Epoch, PURPOSE_READER, MAX_SEALS_PER_EPOCH,
 } from '../src/confidential';
 
@@ -78,6 +79,14 @@ describe('PRIV-02 golden vectors (byte for byte with Go)', () => {
     }
   });
 
+  it('PRIV-02b cellWrites: the procedure-write guard reaches the same verdict as the node', async () => {
+    expect(V.cellWrites.length).toBeGreaterThan(0);
+    for (const w of V.cellWrites) {
+      const got = await code((async () => checkCellWrite(w.current === null ? null : hx(w.current), w.next === null ? null : hx(w.next)))());
+      expect(`${w.name}: ${got}`).toBe(`${w.name}: ${w.error}`);
+    }
+  });
+
   it('keystore backup: restores the Go blob and re-creates it byte for byte', async () => {
     const b = V.backup;
     const id = identityFromAccountSeed(hx(b.accountSeed), BigInt(b.chainId), hx(b.account), b.keyVersion);
@@ -104,6 +113,16 @@ describe('PRIV-02 golden vectors (byte for byte with Go)', () => {
     expect(toHex(lastResortDigest(chain, hx(d.directory), hx(d.account), d.keyVersion, hx(V.kem[0].ek)))).toBe(d.lastResortDigest);
     expect(toHex(poolDigest(chain, hx(d.directory), hx(d.account), d.keyVersion, d.firstIndex, d.poolEks.map(hx)))).toBe(d.poolDigest);
     expect(toHex(grantRef(chain, hx(d.contract), d.group, d.epoch))).toBe(d.grantRef);
+  });
+});
+
+describe('PRIV-02b CONFIDENTIAL column declaration', () => {
+  it('writes the metadata key the node reads, keeps other metadata, refuses empty or repeated lists', () => {
+    const m = declareConfidentialColumns({ owner: 'x' }, { patients: ['diagnosis'] });
+    expect(CONFIDENTIAL_COLUMNS_METADATA_KEY).toBe('confidential_columns');
+    expect(JSON.stringify(m)).toBe('{"owner":"x","confidential_columns":{"patients":["diagnosis"]}}');
+    expect(() => declareConfidentialColumns(undefined, { t: [] })).toThrow();
+    expect(() => declareConfidentialColumns(undefined, { t: ['c', 'c'] })).toThrow();
   });
 });
 

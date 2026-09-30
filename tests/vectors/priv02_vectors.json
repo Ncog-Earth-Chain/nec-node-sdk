@@ -342,5 +342,67 @@
     "group": "default",
     "epoch": 3,
     "grantRef": "0e214c89445d7fad30f2ea7428e115c05f095adb8a1fafa99eaffce10497bb55"
-  }
+  },
+  "cellWrites": [
+    {
+      "name": "first write of an empty cell",
+      "current": null,
+      "next": "01010000000300000000000000016ae78329a3dd4d46547dd91a511c18f5e5e8dd2447d9cdc4b69437b59978fab2bec2693573e72e69",
+      "error": ""
+    },
+    {
+      "name": "successor",
+      "current": "01010000000300000000000000016ae78329a3dd4d46547dd91a511c18f5e5e8dd2447d9cdc4b69437b59978fab2bec2693573e72e69",
+      "next": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "error": ""
+    },
+    {
+      "name": "procedure replays an older envelope",
+      "current": "01010000000300000000000000038b67035b6f07c1c2d16d659f3a1677c5319107dc6432166485f824aab1dc6b726a",
+      "next": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "error": "cellVersion"
+    },
+    {
+      "name": "reused cellVersion, different envelope",
+      "current": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "next": "0101000000030000000000000002e927bec54742f77132b6fcadf1880904314d1017f7ccc38d9fecd27ed320c59df8001755b9d2c33e82bee9e730d0",
+      "error": "cellVersion"
+    },
+    {
+      "name": "skips a cellVersion",
+      "current": "01010000000300000000000000016ae78329a3dd4d46547dd91a511c18f5e5e8dd2447d9cdc4b69437b59978fab2bec2693573e72e69",
+      "next": "01010000000300000000000000038b67035b6f07c1c2d16d659f3a1677c5319107dc6432166485f824aab1dc6b726a",
+      "error": "cellVersion"
+    },
+    {
+      "name": "first write may not start above 1",
+      "current": null,
+      "next": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "error": "cellVersion"
+    },
+    {
+      "name": "unchanged cell",
+      "current": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "next": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "error": ""
+    },
+    {
+      "name": "clearing an envelope",
+      "current": "01010000000300000000000000027a03319f41d0213fea1241b33a904878efa27f6c8094421964c8b607",
+      "next": null,
+      "error": "cellClear"
+    },
+    {
+      "name": "NULL stays NULL",
+      "current": null,
+      "next": null,
+      "error": ""
+    },
+    {
+      "name": "not an envelope",
+      "current": "01010000000300000000000000016ae78329a3dd4d46547dd91a511c18f5e5e8dd2447d9cdc4b69437b59978fab2bec2693573e72e69",
+      "next": "",
+      "error": "format"
+    }
+  ]
 }
