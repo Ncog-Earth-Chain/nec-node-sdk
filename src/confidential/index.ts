@@ -324,6 +324,268 @@ export async function acceptGrant(k: RecipientKey, g: Grant, chainId: bigint, co
   throw new ConfidentialError('notAGrantMember');
 }
 
+// ---- the grant record (PRIV-02d, NEC-171; spec §3.1) --------------------------------------------
+//
+// Where a key-group owner publishes its grants so a reader finds its wrapped key without being handed it out
+// of band: the contract metadata key `confidential_grants`, in exactly this canonical JSON (keys in byte
+// order, no whitespace, entries sorted by group then epoch):
+//   {"grants":[{"epoch":<uint32>,"grant":"0x<hex of encodeGrant>","group":"<name>"},...],"version":1}
+// The node checks the SHAPE and that an upgrade only appends (ddb/confidential/grantrecord.go); these mirror
+// it verdict for verdict (tests/vectors/priv02_grant_record_vectors.json).
+
+/** Contract-metadata key under which a data contract publishes its grants (PRIV-02d). */
+export const CONFIDENTIAL_GRANTS_METADATA_KEY = 'confidential_grants';
+/** The record layout this code reads and writes; any other version is refused. */
+export const GRANT_RECORD_VERSION = 1;
+
+/** The record's size bounds. Policy, not format: the node reads them through one accessor (GrantRecordLimitsInForce). */
+export interface GrantRecordLimits { maxGrants: number; maxSlotsPerGrant: number; maxRecordBytes: number; maxGroupBytes: number }
+export const DEFAULT_GRANT_RECORD_LIMITS: GrantRecordLimits = { maxGrants: 16, maxSlotsPerGrant: 16, maxRecordBytes: 40 << 10, maxGroupBytes: 64 };
+
+export type GrantRecordErrorCode =
+  | 'format' | 'version' | 'order' | 'duplicate' | 'group' | 'epochMismatch' | 'grant' | 'slots' | 'count' | 'size'
+  | 'changed' | 'latestDropped' | 'epochNotNewer';
+
+/** A refused record; code is the vector file's (and the node's) error name. */
+export class GrantRecordError extends Error {
+  constructor(public readonly code: GrantRecordErrorCode, message: string) {
+    super(`confidential grant record: ${message}`);
+  }
+}
+
+export interface GrantRecordEntry { epoch: number; grant: string; group: string }
+export interface GrantRecord { grants: GrantRecordEntry[]; version: number }
+
+const MAX_U32 = 0xffffffff;
+const GRANT_FIXED = 1 + 4 + 32 + 2;
+const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const hexBytes = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16)); // h is checked even-length lower-case hex
+
+// Go's encoding/json (with HTML escaping off) differs from JSON.stringify in escaping U+2028/U+2029 and in
+// printing a negative zero as -0 (goJSON below); its float formatting is otherwise ES6's.
+const goString = (s: string) => JSON.stringify(s).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+
+// Encodes a decoded JSON value the way Go re-encodes a generic one: object keys in byte (UTF-16 code unit,
+// equal for the record's ASCII keys) order, no whitespace.
+function goJSON(v: unknown): string {
+  if (v === null || typeof v === 'boolean') return String(v);
+  if (typeof v === 'number') return Object.is(v, -0) ? '-0' : JSON.stringify(v);
+  if (typeof v === 'string') return goString(v);
+  if (Array.isArray(v)) return `[${v.map(goJSON).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).sort().map((k) => `${goString(k)}:${goJSON(o[k])}`).join(',')}}`;
+}
+
+// Go decodes a lone surrogate escape to U+FFFD; mirror it so both sides see one string.
+function wellFormed(v: unknown): unknown {
+  if (typeof v === 'string') {
+    // a plain loop, not a lookbehind regex: the mobile wallet's engine (Hermes) is a target too
+    let out = '';
+    for (let i = 0; i < v.length; i++) {
+      const c = v.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < v.length && v.charCodeAt(i + 1) >= 0xdc00 && v.charCodeAt(i + 1) <= 0xdfff) {
+        out += v[i] + v[++i];
+      } else {
+        out += c >= 0xd800 && c <= 0xdfff ? '\ufffd' : v[i];
+      }
+    }
+    return out;
+  }
+  if (Array.isArray(v)) return v.map(wellFormed);
+  if (v !== null && typeof v === 'object') {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [wellFormed(k) as string, wellFormed(x)]));
+  }
+  return v;
+}
+
+// Strict struct decode as encoding/json does it with DisallowUnknownFields: field names match
+// case-insensitively (the canonical-form check below then refuses the other spelling), null leaves the zero value.
+function fields(o: unknown, names: string[], what: string): Record<string, unknown> {
+  if (o === null) return {};
+  if (typeof o !== 'object' || Array.isArray(o)) throw new GrantRecordError('format', `${what} must be an object`);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+    const name = names.find((n) => n.toLowerCase() === k.toLowerCase());
+    if (!name) throw new GrantRecordError('format', `${what}: unknown field ${JSON.stringify(k)}`);
+    out[name] = v;
+  }
+  return out;
+}
+
+function asUint(v: unknown, max: number, what: string): number {
+  if (v === undefined || v === null) return 0;
+  // Object.is(-0): Go re-encodes a negative zero as -0, which no unsigned field decodes
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || Object.is(v, -0) || v > max) throw new GrantRecordError('format', `${what} must be an integer in [0, ${max}]`);
+  return v;
+}
+
+function asString(v: unknown, what: string): string {
+  if (v === undefined || v === null) return '';
+  if (typeof v !== 'string') throw new GrantRecordError('format', `${what} must be a string`);
+  return v;
+}
+
+const entryLess = (a: GrantRecordEntry, b: GrantRecordEntry) =>
+  a.group !== b.group ? cmp(enc.encode(a.group), enc.encode(b.group)) < 0 : a.epoch < b.epoch;
+
+/** The record's canonical JSON (the bytes the vectors pin). Entries are sorted here, so a writer can append and call it. */
+export function canonicalGrantRecord(r: GrantRecord): string {
+  const grants = [...r.grants].sort((a, b) => (entryLess(a, b) ? -1 : entryLess(b, a) ? 1 : 0));
+  return goJSON({ grants: grants.map((e) => ({ epoch: e.epoch, grant: e.grant, group: e.group })), version: r.version });
+}
+
+/**
+ * Reads a `confidential_grants` value (the decoded metadata value, or its JSON text) and checks its shape
+ * against lim exactly as the node does: version, canonical entry order with no duplicate (group, epoch), a
+ * valid group name, canonical hex, a grant that decodes with the entry's epoch, version-1 slots, the bounds.
+ */
+export function parseGrantRecord(value: unknown, lim: GrantRecordLimits = DEFAULT_GRANT_RECORD_LIMITS): GrantRecord {
+  let v = value;
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v);
+    } catch (e) {
+      throw new GrantRecordError('format', `not JSON: ${String(e)}`);
+    }
+  }
+  v = wellFormed(v);
+  const raw = goJSON(v);
+  const top = fields(v, ['grants', 'version'], 'the record');
+  if (top.version !== undefined && top.version !== null && (typeof top.version !== 'number' || !Number.isInteger(top.version))) {
+    throw new GrantRecordError('format', 'version must be an integer');
+  }
+  if (top.grants !== undefined && top.grants !== null && !Array.isArray(top.grants)) throw new GrantRecordError('format', '"grants" must be an array');
+  const entries = ((top.grants as unknown[] | undefined) ?? []).map((x, i) => {
+    const f = fields(x, ['epoch', 'grant', 'group'], `entry ${i}`);
+    return { epoch: asUint(f.epoch, MAX_U32, `entry ${i}: epoch`), grant: asString(f.grant, `entry ${i}: grant`), group: asString(f.group, `entry ${i}: group`) };
+  });
+  const version = (top.version as number | undefined) ?? 0;
+  if (version !== GRANT_RECORD_VERSION) {
+    throw new GrantRecordError('version', `version ${version} is not supported (this client reads version ${GRANT_RECORD_VERSION})`);
+  }
+  if (top.grants === undefined || top.grants === null) throw new GrantRecordError('format', '"grants" must be an array');
+  if (entries.length > lim.maxGrants) throw new GrantRecordError('count', `${entries.length} grants exceed the bound of ${lim.maxGrants} (prune old epochs)`);
+  let total = 0;
+  entries.forEach((e, i) => {
+    const gb = enc.encode(e.group).length;
+    if (gb === 0 || gb > lim.maxGroupBytes) throw new GrantRecordError('group', `entry ${i}: the key group must be 1..${lim.maxGroupBytes} bytes of UTF-8`);
+    if (i > 0) {
+      const p = entries[i - 1];
+      if (p.group === e.group && p.epoch === e.epoch) throw new GrantRecordError('duplicate', `entry ${i}: group ${JSON.stringify(e.group)} epoch ${e.epoch} is granted twice`);
+      if (!entryLess(p, e)) throw new GrantRecordError('order', `entry ${i}: entries must be sorted by group then epoch`);
+    }
+    const h = e.grant.startsWith('0x') ? e.grant.slice(2) : null;
+    if (h === null || h.length % 2 !== 0 || !/^[0-9a-f]*$/.test(h)) throw new GrantRecordError('format', `entry ${i}: the grant must be 0x-prefixed lower-case hex`);
+    const b = hexBytes(h);
+    if (b.length >= GRANT_FIXED) {
+      const n = (b[GRANT_FIXED - 2] << 8) | b[GRANT_FIXED - 1];
+      if (n > lim.maxSlotsPerGrant) throw new GrantRecordError('slots', `entry ${i}: ${n} slots exceed the bound of ${lim.maxSlotsPerGrant}`);
+    }
+    let g: Grant;
+    try {
+      g = decodeGrant(b);
+    } catch (err) {
+      throw new GrantRecordError('grant', `entry ${i}: the grant does not decode: ${String(err)}`);
+    }
+    if (g.slots.length === 0) throw new GrantRecordError('slots', `entry ${i}: a grant with no slot opens nothing`);
+    g.slots.forEach((s, j) => {
+      if (s.slot[0] !== 0x01) throw new GrantRecordError('grant', `entry ${i}: slot ${j} is not a version-1 slot`);
+    });
+    if (g.epoch !== e.epoch) throw new GrantRecordError('epochMismatch', `entry ${i}: the entry says epoch ${e.epoch} but its grant opens epoch ${g.epoch}`);
+    if ((total += b.length) > lim.maxRecordBytes) throw new GrantRecordError('size', `the grants total more than ${lim.maxRecordBytes} bytes (prune old epochs)`);
+  });
+  const r: GrantRecord = { grants: entries, version };
+  if (raw !== canonicalGrantRecord(r)) throw new GrantRecordError('format', 'the record is not in canonical form');
+  return r;
+}
+
+/** The grant for (group, epoch), or null when the record has none. */
+export function findGrant(r: GrantRecord, group: string, epoch: number): Grant | null {
+  const e = r.grants.find((x) => x.group === group && x.epoch === epoch);
+  return e ? decodeGrant(hexBytes(e.grant.slice(2))) : null;
+}
+
+/**
+ * The rule for an upgrade that carries next over a deployed stored record (null: none): a published grant
+ * is never changed, a group's latest epoch is never pruned, and a new entry opens a newer epoch.
+ */
+export function checkGrantRecordUpgrade(stored: GrantRecord | null, next: GrantRecord | null): void {
+  if (!stored) return;
+  const latest = new Map<string, number>();
+  const have = new Map<string, Map<number, string>>();
+  for (const e of stored.grants) {
+    if (!have.has(e.group)) have.set(e.group, new Map());
+    have.get(e.group)!.set(e.epoch, e.grant);
+    if (e.epoch >= (latest.get(e.group) ?? 0)) latest.set(e.group, e.epoch);
+  }
+  const kept = new Set<string>();
+  for (const e of next?.grants ?? []) {
+    const was = have.get(e.group)?.get(e.epoch);
+    if (was !== undefined) {
+      if (was !== e.grant) {
+        throw new GrantRecordError('changed', `group ${JSON.stringify(e.group)} epoch ${e.epoch} is already published with other bytes; open a new epoch instead`);
+      }
+      kept.add(`${e.epoch}\u0000${e.group}`);
+      continue;
+    }
+    const l = latest.get(e.group);
+    if (l !== undefined && e.epoch <= l) {
+      throw new GrantRecordError('epochNotNewer', `group ${JSON.stringify(e.group)} epoch ${e.epoch} is not newer than its latest published epoch ${l}`);
+    }
+  }
+  for (const g of [...latest.keys()].sort()) {
+    if (!kept.has(`${latest.get(g)}\u0000${g}`)) throw new GrantRecordError('latestDropped', `group ${JSON.stringify(g)}: its latest epoch ${latest.get(g)} may not be pruned`);
+  }
+}
+
+/**
+ * Returns a copy of a contract's metadata with grant g of group appended to its grant record (the owner's
+ * "open epoch" write, carried by the next upgrade). The result passes the node's shape and append checks.
+ */
+export function publishGrant(metadata: Record<string, unknown> | undefined, group: string, g: Grant): Record<string, unknown> {
+  const cur = metadata?.[CONFIDENTIAL_GRANTS_METADATA_KEY];
+  const stored = cur === undefined || cur === null ? null : parseGrantRecord(cur);
+  const entry = { epoch: g.epoch, grant: `0x${hexOf(encodeGrant(g))}`, group };
+  const next: GrantRecord = { version: GRANT_RECORD_VERSION, grants: [...(stored?.grants ?? []), entry] };
+  checkGrantRecordUpgrade(stored, next);
+  const text = canonicalGrantRecord(next);
+  parseGrantRecord(text); // the bounds and the slot checks, exactly as the node will apply them
+  return { ...(metadata ?? {}), [CONFIDENTIAL_GRANTS_METADATA_KEY]: JSON.parse(text) };
+}
+
+/**
+ * The ACTIVE version's metadata from a ddb_getSchema(contractAddress) result: contracts[].versions[] with
+ * status "active", whose spec_json is the contract definition. undefined when no version is active.
+ */
+export function activeMetadataFromSchema(info: unknown): Record<string, unknown> | undefined {
+  const contracts = (info as { contracts?: unknown })?.contracts;
+  for (const c of Array.isArray(contracts) ? contracts : []) {
+    const versions = (c as { versions?: unknown })?.versions;
+    for (const v of Array.isArray(versions) ? versions : []) {
+      const ver = v as { status?: unknown; spec_json?: unknown };
+      if (ver.status !== 'active' || typeof ver.spec_json !== 'string') continue;
+      const m = (JSON.parse(ver.spec_json) as { metadata?: unknown }).metadata;
+      return m !== null && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, unknown>) : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** The grant for (group, epoch) in a contract's metadata (e.g. ddb_getSchema's spec), or null. */
+export function grantFromMetadata(metadata: Record<string, unknown> | undefined, group: string, epoch: number): Grant | null {
+  const v = metadata?.[CONFIDENTIAL_GRANTS_METADATA_KEY];
+  return v === undefined || v === null ? null : findGrant(parseGrantRecord(v), group, epoch);
+}
+
+/** A reader's side: find the published grant in the contract's metadata, then acceptGrant (key commitment). */
+export async function acceptGrantFromMetadata(
+  k: RecipientKey, metadata: Record<string, unknown> | undefined, chainId: bigint, contract: Uint8Array, group: string, epoch: number,
+): Promise<Epoch> {
+  const g = grantFromMetadata(metadata, group, epoch);
+  if (!g) throw new ConfidentialError('notAGrantMember', `confidential: no grant published for group ${group} epoch ${epoch}`);
+  return acceptGrant(k, g, chainId, contract, group);
+}
+
 // ---- identity and keystore backup (key restore) -----------------------------------------------
 
 /** The directory identity key, derived from the account seed (restored with it). Never opens a slot. */
