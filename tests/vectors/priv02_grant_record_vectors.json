@@ -212,6 +212,11 @@
       "name": "whitespace and key order are not part of the value",
       "record": "{\"version\": 1, \"grants\": []}",
       "error": ""
+    },
+    {
+      "name": "a lone surrogate escape is read as U+FFFD",
+      "record": "{\"grants\":[{\"epoch\":1,\"grant\":\"0x\",\"group\":\"\\ud800\"}],\"version\":1}",
+      "error": "grant"
     }
   ],
   "upgrades": [

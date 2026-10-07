@@ -377,7 +377,19 @@ function goJSON(v: unknown): string {
 
 // Go decodes a lone surrogate escape to U+FFFD; mirror it so both sides see one string.
 function wellFormed(v: unknown): unknown {
-  if (typeof v === 'string') return v.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '\ufffd');
+  if (typeof v === 'string') {
+    // a plain loop, not a lookbehind regex: the mobile wallet's engine (Hermes) is a target too
+    let out = '';
+    for (let i = 0; i < v.length; i++) {
+      const c = v.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < v.length && v.charCodeAt(i + 1) >= 0xdc00 && v.charCodeAt(i + 1) <= 0xdfff) {
+        out += v[i] + v[++i];
+      } else {
+        out += c >= 0xd800 && c <= 0xdfff ? '\ufffd' : v[i];
+      }
+    }
+    return out;
+  }
   if (Array.isArray(v)) return v.map(wellFormed);
   if (v !== null && typeof v === 'object') {
     return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [wellFormed(k) as string, wellFormed(x)]));
