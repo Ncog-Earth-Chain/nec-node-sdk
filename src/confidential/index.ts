@@ -539,6 +539,24 @@ export function publishGrant(metadata: Record<string, unknown> | undefined, grou
   return { ...(metadata ?? {}), [CONFIDENTIAL_GRANTS_METADATA_KEY]: JSON.parse(text) };
 }
 
+/**
+ * The ACTIVE version's metadata from a ddb_getSchema(contractAddress) result: contracts[].versions[] with
+ * status "active", whose spec_json is the contract definition. undefined when no version is active.
+ */
+export function activeMetadataFromSchema(info: unknown): Record<string, unknown> | undefined {
+  const contracts = (info as { contracts?: unknown })?.contracts;
+  for (const c of Array.isArray(contracts) ? contracts : []) {
+    const versions = (c as { versions?: unknown })?.versions;
+    for (const v of Array.isArray(versions) ? versions : []) {
+      const ver = v as { status?: unknown; spec_json?: unknown };
+      if (ver.status !== 'active' || typeof ver.spec_json !== 'string') continue;
+      const m = (JSON.parse(ver.spec_json) as { metadata?: unknown }).metadata;
+      return m !== null && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, unknown>) : undefined;
+    }
+  }
+  return undefined;
+}
+
 /** The grant for (group, epoch) in a contract's metadata (e.g. ddb_getSchema's spec), or null. */
 export function grantFromMetadata(metadata: Record<string, unknown> | undefined, group: string, epoch: number): Grant | null {
   const v = metadata?.[CONFIDENTIAL_GRANTS_METADATA_KEY];

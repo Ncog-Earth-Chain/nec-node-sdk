@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   parseGrantRecord, canonicalGrantRecord, checkGrantRecordUpgrade, findGrant, publishGrant, grantFromMetadata,
-  acceptGrantFromMetadata, newGrant, recipientKeyFromSeed, newRecipientKey, GrantRecordError,
+  acceptGrantFromMetadata, activeMetadataFromSchema, newGrant, recipientKeyFromSeed, newRecipientKey, GrantRecordError,
   CONFIDENTIAL_GRANTS_METADATA_KEY, DEFAULT_GRANT_RECORD_LIMITS, GRANT_RECORD_VERSION, GrantRecord,
 } from '../src/confidential';
 
@@ -98,5 +98,17 @@ describe('PRIV-02d publishing a grant (the wallet "open epoch" write)', () => {
     expect(code(() => publishGrant(m, 'default', again.grant))).toBe('changed');
     const older = await newGrant(chainId, contract, 'default', 2, [r.ek]);
     expect(code(() => publishGrant(m, 'default', older.grant))).toBe('epochNotNewer');
+  });
+});
+
+describe('PRIV-02d reading the record from ddb_getSchema', () => {
+  it('takes the ACTIVE version\'s metadata from spec_json', () => {
+    const info = { contracts: [{ versions: [
+      { status: 'superseded', spec_json: JSON.stringify({ metadata: { v: 1 } }) },
+      { status: 'active', spec_json: JSON.stringify({ metadata: { v: 2 } }) },
+    ] }] };
+    expect(activeMetadataFromSchema(info)).toEqual({ v: 2 });
+    expect(activeMetadataFromSchema({ contracts: [{ versions: [{ status: 'pending', spec_json: '{}' }] }] })).toBeUndefined();
+    expect(activeMetadataFromSchema({})).toBeUndefined();
   });
 });
