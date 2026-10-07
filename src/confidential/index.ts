@@ -361,14 +361,15 @@ const GRANT_FIXED = 1 + 4 + 32 + 2;
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 const hexBytes = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16)); // h is checked even-length lower-case hex
 
-// Go's encoding/json (with HTML escaping off) differs from JSON.stringify only in escaping U+2028/U+2029.
+// Go's encoding/json (with HTML escaping off) differs from JSON.stringify in escaping U+2028/U+2029 and in
+// printing a negative zero as -0 (goJSON below); its float formatting is otherwise ES6's.
 const goString = (s: string) => JSON.stringify(s).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 // Encodes a decoded JSON value the way Go re-encodes a generic one: object keys in byte (UTF-16 code unit,
 // equal for the record's ASCII keys) order, no whitespace.
 function goJSON(v: unknown): string {
   if (v === null || typeof v === 'boolean') return String(v);
-  if (typeof v === 'number') return JSON.stringify(v);
+  if (typeof v === 'number') return Object.is(v, -0) ? '-0' : JSON.stringify(v);
   if (typeof v === 'string') return goString(v);
   if (Array.isArray(v)) return `[${v.map(goJSON).join(',')}]`;
   const o = v as Record<string, unknown>;
@@ -413,7 +414,8 @@ function fields(o: unknown, names: string[], what: string): Record<string, unkno
 
 function asUint(v: unknown, max: number, what: string): number {
   if (v === undefined || v === null) return 0;
-  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > max) throw new GrantRecordError('format', `${what} must be an integer in [0, ${max}]`);
+  // Object.is(-0): Go re-encodes a negative zero as -0, which no unsigned field decodes
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || Object.is(v, -0) || v > max) throw new GrantRecordError('format', `${what} must be an integer in [0, ${max}]`);
   return v;
 }
 

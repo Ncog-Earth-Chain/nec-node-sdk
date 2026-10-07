@@ -214,6 +214,16 @@
       "error": ""
     },
     {
+      "name": "a negative-zero epoch",
+      "record": "{\"grants\":[{\"epoch\":-0,\"grant\":\"0x\",\"group\":\"default\"}],\"version\":1}",
+      "error": "format"
+    },
+    {
+      "name": "a negative-zero version",
+      "record": "{\"grants\":[],\"version\":-0}",
+      "error": "version"
+    },
+    {
       "name": "a lone surrogate escape is read as U+FFFD",
       "record": "{\"grants\":[{\"epoch\":1,\"grant\":\"0x\",\"group\":\"\\ud800\"}],\"version\":1}",
       "error": "grant"
