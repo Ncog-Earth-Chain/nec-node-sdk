@@ -1,0 +1,14 @@
+{
+  "comment": "DB-02 (NEC-78) C-10: what a client sends as a procedure argument (arg, Postgres text input form) and what every row-returning read hands back (row). Shared by gossip/ddb/db02_conformance_pg_test.go (written and read through the real node path) and nec-node-sdk tests/ddb-types.test.ts (the SDK's encoders and decoders). bytea goes in as Postgres hex text and comes out as 0x-hex (NEC-164); numeric goes in and out as its exact decimal text.",
+  "bytea": [
+    {"name": "non-UTF-8 bytes", "bytes": "00ff80fe7fc3", "arg": "\\x00ff80fe7fc3", "row": "0x00ff80fe7fc3"},
+    {"name": "empty", "bytes": "", "arg": "\\x", "row": "0x"},
+    {"name": "every byte value", "bytes": "000102037f8081feff", "arg": "\\x000102037f8081feff", "row": "0x000102037f8081feff"}
+  ],
+  "numeric": [
+    {"name": "beyond float64 and int64", "arg": "123456789012345678901234567890.123456789012345678901234567890", "row": "123456789012345678901234567890.123456789012345678901234567890"},
+    {"name": "tiny negative", "arg": "-0.000000000000000000000000000001", "row": "-0.000000000000000000000000000001"},
+    {"name": "scale is kept", "arg": "1.500", "row": "1.500"},
+    {"name": "zero", "arg": "0", "row": "0"}
+  ]
+}

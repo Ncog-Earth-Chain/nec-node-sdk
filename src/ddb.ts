@@ -220,6 +220,26 @@ const DDB_DEFAULT_EXPIRY_SECONDS = BigInt(300);
 function ddbStripHex(h: string): string {
   return h.startsWith('0x') || h.startsWith('0X') ? h.slice(2) : h;
 }
+/**
+ * DB-02 (NEC-78) C-10: a bytea procedure ARGUMENT in Postgres's hex input form (\\x...). Procedure arguments
+ * travel as text and Postgres casts them to the parameter's type, so this is the exact text for `bytes`.
+ */
+export function ddbByteaArg(bytes: Uint8Array): string {
+  return '\\x' + ddbBytesToHex(bytes);
+}
+
+/**
+ * DB-02 (NEC-78) C-10: the bytes of a bytea column as every row-returning read renders it -- 0x-prefixed
+ * lower-case hex (NEC-164). Anything else is refused rather than guessed at: a text column holding binary
+ * would have been corrupted already.
+ */
+export function ddbByteaFromRow(v: unknown): Uint8Array {
+  if (typeof v !== 'string' || !/^0x([0-9a-f]{2})*$/.test(v)) {
+    throw new Error(`DDB: not a bytea row value (want 0x-prefixed lower-case hex): ${JSON.stringify(v)}`);
+  }
+  return ddbHexToBytes(v.slice(2));
+}
+
 function ddbHexToBytes(h: string): Uint8Array {
   const s = ddbStripHex(h);
   const clean = s.length % 2 ? '0' + s : s;
