@@ -26,6 +26,8 @@ export {
   DDB_TXN_MAX_OPS, DDB_TXN_MAX_READS,
   type DdbTxnRead, type DdbTxnMemberSpec, type DdbTxnOptions, type DdbPreparedTxn, type DdbPreparedTxnMember,
   type DdbTxnHeaderEnvelope, type DdbTxnReceipt,
+  // DB-02 (NEC-78) C-10: bytea arguments in and bytea row values out, byte for byte.
+  ddbByteaArg, ddbByteaFromRow,
 } from './ddb';
 // Typed DDB contract definitions + the point-op (row-lock) declaration, and build-time eligibility validation.
 export {
