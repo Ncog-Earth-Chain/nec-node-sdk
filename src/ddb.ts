@@ -30,6 +30,86 @@ export interface DdbQueryOptions {
   minVersion?: string | number;
   /** How long the node may wait for `minVersion` (ms). 0/omitted = node default (5 s); capped at 30 s. */
   waitMs?: number;
+  /**
+   * DB-02 exact numbers: bigint (int8) columns come back as `bigint`, exactly -- including 2^53+1, -2^63
+   * and 2^63-1, which a plain read rounds to the nearest double. numeric columns stay decimal strings (they
+   * always were). See {@link DdbReadFormat}.
+   */
+  exactNumbers?: boolean;
+}
+
+/**
+ * DB-02 (NEC-78) read format: ddb_query's and ddb_callReadProcedure's optional fifth parameter, and
+ * ddb_signedCallReadProcedure's optional third one (ddb_select / ddb_selectVersioned / ddb_signedSelect take
+ * `exactNumbers` in their query options instead).
+ *
+ * With `exactNumbers: true` the node renders every int8 column as its decimal string and reports each
+ * column's type ({"columns", "rows"}); the SDK turns exactly the int8 columns into `bigint`. A text column
+ * that holds digits stays a string. Without the flag nothing changes: the node answers the bare row array and
+ * an int8 beyond 2^53 is a rounded `number`, as before. A node that predates the flag ignores it and answers
+ * the bare array; the SDK then THROWS rather than return rounded numbers as exact.
+ */
+export interface DdbReadFormat {
+  exactNumbers?: boolean;
+}
+
+/** A row read with `exactNumbers`: int8 columns are `bigint`, numeric columns decimal strings, NULL is null. */
+export type DdbExactRow = Record<string, bigint | string | number | boolean | null | unknown>;
+
+/** One result column the node reports under `exactNumbers`: its name and its Postgres type ("int8", "text", ...). */
+export interface DdbReadColumn {
+  name: string;
+  type: string;
+}
+
+/** The SDK's error for a node that ignored `exactNumbers` (it answered the bare row array). */
+export const DDB_EXACT_NUMBERS_UNSUPPORTED = 'DDB_EXACT_NUMBERS_UNSUPPORTED';
+
+/**
+ * Decode an `exactNumbers` answer ({columns, rows}) into rows whose int8 columns are `bigint`. Exported for
+ * callers that talk to the node through their own transport.
+ */
+export function ddbExactRows(method: string, res: unknown): { rows: DdbExactRow[]; columns: DdbReadColumn[] } {
+  const r = res as { columns?: unknown; rows?: unknown } | null;
+  if (Array.isArray(res) || r == null || !Array.isArray(r.columns) || !Array.isArray(r.rows)) {
+    const err = new Error(`${method}: the node ignored exactNumbers (it predates DB-02 and answered rows whose ` +
+      `int8 values may already be rounded); refusing to return them as exact`) as Error & { code?: string };
+    err.code = DDB_EXACT_NUMBERS_UNSUPPORTED;
+    throw err;
+  }
+  const columns = r.columns as DdbReadColumn[];
+  // Every row key must be a reported column, and a name two columns share (a join's two `id`s) must have one
+  // type: a row map keeps one value per name, so otherwise which value is int8 is unknowable. A key the columns
+  // list does not name is a value the node never rendered under exact mode -- it may already be rounded.
+  const typeOf = new Map<string, string>();
+  for (const c of columns) {
+    const prev = typeOf.get(c?.name);
+    if (prev !== undefined && prev !== c.type) {
+      throw new Error(`${method}: two columns named ${JSON.stringify(c.name)} (${prev}, ${c.type}); alias one ` +
+        `in the query -- refusing to guess which value is exact`);
+    }
+    typeOf.set(c?.name, c?.type);
+  }
+  const int8 = [...typeOf].filter(([, t]) => t === 'int8').map(([n]) => n);
+  const rows = (r.rows as DdbExactRow[]).map((row) => {
+    for (const k of Object.keys(row ?? {})) {
+      if (!typeOf.has(k)) {
+        throw new Error(`${method}: row key ${JSON.stringify(k)} is not in the reply's columns; refusing to ` +
+          `return it as exact`);
+      }
+    }
+    const out: DdbExactRow = { ...row };
+    for (const name of int8) {
+      const v = out[name];
+      if (v === null || v === undefined) continue;
+      if (typeof v !== 'string' || !/^-?[0-9]+$/.test(v)) {
+        throw new Error(`${method}: int8 column ${JSON.stringify(name)} is not a decimal string: ${JSON.stringify(v)}`);
+      }
+      out[name] = BigInt(v);
+    }
+    return out;
+  });
+  return { rows, columns };
 }
 
 /**
@@ -67,6 +147,15 @@ function withReadToken<T extends { minVersion?: string | number | bigint }>(opts
 export interface DdbVersionedRows {
   rows: DdbRow[];
   dataVersion: string;
+  /** Present only for an `exactNumbers` read (DB-02): the result's columns and their types. */
+  columns?: DdbReadColumn[];
+}
+
+/** ddb_selectVersioned read with `exactNumbers` (DB-02): int8 columns are `bigint`, and the columns are present. */
+export interface DdbExactVersionedRows {
+  rows: DdbExactRow[];
+  dataVersion: string;
+  columns: DdbReadColumn[];
 }
 
 // Options for the client-signed DDB write methods. Both fields are part of the signed
@@ -1794,27 +1883,44 @@ export class Ddb {
   }
 
   /** Select rows with optional filters / ordering / pagination. `schemaName` = derived db_name (Ddb.deriveDbName). */
-  select(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbRow[]> {
-    return this.call('ddb_select', [schemaName, tableName, withReadToken(opts)]);
+  select(schemaName: string, tableName: string, opts?: DdbQueryOptions & { exactNumbers?: false }): Promise<DdbRow[]>;
+  select(schemaName: string, tableName: string, opts: DdbQueryOptions & { exactNumbers: true }): Promise<DdbExactRow[]>;
+  select(schemaName: string, tableName: string, opts?: DdbQueryOptions): Promise<DdbRow[] | DdbExactRow[]>;
+  async select(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbRow[] | DdbExactRow[]> {
+    const res = await this.call('ddb_select', [schemaName, tableName, withReadToken(opts)]);
+    return opts?.exactNumbers ? ddbExactRows('ddb_select', res).rows : res;
   }
 
   /**
    * ddb_select that also returns `dataVersion`, the applied version the rows reflect at least (DB-03).
    * Takes the same `minVersion`/`waitMs` token as select.
    */
-  selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows> {
-    return this.call('ddb_selectVersioned', [schemaName, tableName, withReadToken(opts)]);
+  selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions & { exactNumbers: true }): Promise<DdbExactVersionedRows>;
+  selectVersioned(schemaName: string, tableName: string, opts?: DdbQueryOptions): Promise<DdbVersionedRows>;
+  async selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows | DdbExactVersionedRows> {
+    const res = await this.call('ddb_selectVersioned', [schemaName, tableName, withReadToken(opts)]);
+    if (!opts?.exactNumbers) return res;
+    const { rows, columns } = ddbExactRows('ddb_selectVersioned', res && res.columns ? res : [res]);
+    return { ...res, rows, columns };
   }
 
   /**
    * Simple row fetch (up to `limit` rows). `schemaName` is the derived db_name (Ddb.deriveDbName).
    * `consistency` is the DB-03 read token, as on callReadProcedure (NEC-152).
    */
-  query(schemaName: string, tableName: string, limit = 100, consistency?: DdbReadConsistency): Promise<DdbRow[]> {
-    // The token is a fourth parameter only when given, so an old node sees exactly the call it always did.
+  query(schemaName: string, tableName: string, limit?: number, consistency?: DdbReadConsistency, format?: DdbReadFormat & { exactNumbers?: false }): Promise<DdbRow[]>;
+  query(schemaName: string, tableName: string, limit: number | undefined, consistency: DdbReadConsistency | undefined, format: DdbReadFormat & { exactNumbers: true }): Promise<DdbExactRow[]>;
+  query(schemaName: string, tableName: string, limit?: number, consistency?: DdbReadConsistency, format?: DdbReadFormat): Promise<DdbRow[] | DdbExactRow[]>;
+  async query(
+    schemaName: string, tableName: string, limit = 100, consistency?: DdbReadConsistency, format?: DdbReadFormat,
+  ): Promise<DdbRow[] | DdbExactRow[]> {
+    // The token is a fourth parameter only when given, and the read format (DB-02) a fifth only when it asks
+    // for exact numbers, so an old call sends exactly what it always did.
     const params: unknown[] = [schemaName, tableName, limit];
-    if (consistency) params.push(withReadToken(consistency));
-    return this.call('ddb_query', params);
+    if (consistency || format?.exactNumbers) params.push(consistency ? withReadToken(consistency) : null);
+    if (format?.exactNumbers) params.push({ exactNumbers: true });
+    const res = await this.call('ddb_query', params);
+    return format?.exactNumbers ? ddbExactRows('ddb_query', res).rows : res;
   }
 
   /**
@@ -1825,13 +1931,15 @@ export class Ddb {
    * Signed: chain id, schema, table, `readOpts.joinTables`, from, timestamp, nonce. NOT signed: `query`
    * (filters, joins, ordering, limit), which travels beside the envelope. Each signed read is single use.
    */
+  signedSelect(signer: DdbSignerLike, schemaName: string, tableName: string, query: DdbQueryOptions & { exactNumbers: true }, readOpts?: DdbSignedReadOptions): Promise<DdbExactRow[]>;
+  signedSelect(signer: DdbSignerLike, schemaName: string, tableName: string, query?: DdbQueryOptions | Record<string, unknown>, readOpts?: DdbSignedReadOptions): Promise<DdbRow[]>;
   async signedSelect(
     signer: DdbSignerLike,
     schemaName: string,
     tableName: string,
     query: DdbQueryOptions | Record<string, unknown> = {},
     readOpts: DdbSignedReadOptions = {},
-  ): Promise<DdbRow[]> {
+  ): Promise<DdbRow[] | DdbExactRow[]> {
     const s = toDdbSigner(signer);
     const chainId = readOpts.chainId ?? (await this.call('eth_chainId'));
     const prepared = buildDdbSignedRead(
@@ -1839,7 +1947,8 @@ export class Ddb {
     );
     const sig = await s.signDdbHash(prepared.hash);
     const envelope: DdbSignedReadEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
-    return this.call('ddb_signedSelect', [envelope, withReadToken(query as DdbQueryOptions)]);
+    const res = await this.call('ddb_signedSelect', [envelope, withReadToken(query as DdbQueryOptions)]);
+    return (query as DdbQueryOptions)?.exactNumbers ? ddbExactRows('ddb_signedSelect', res).rows : res;
   }
 
   /**
@@ -1847,13 +1956,19 @@ export class Ddb {
    * procedure the active contract declares `"read_only": true` is accepted; `args` are bound, never
    * interpolated. Anonymous, so the node refuses it for a reader-role contract like select/query.
    */
-  callReadProcedure(
-    schemaName: string, procedure: string, args: string[] = [], consistency?: DdbReadConsistency,
-  ): Promise<DdbRow[]> {
-    // The token is a fourth parameter only when given, so an old node sees exactly the call it always did.
+  callReadProcedure(schemaName: string, procedure: string, args?: string[], consistency?: DdbReadConsistency, format?: DdbReadFormat & { exactNumbers?: false }): Promise<DdbRow[]>;
+  callReadProcedure(schemaName: string, procedure: string, args: string[] | undefined, consistency: DdbReadConsistency | undefined, format: DdbReadFormat & { exactNumbers: true }): Promise<DdbExactRow[]>;
+  callReadProcedure(schemaName: string, procedure: string, args?: string[], consistency?: DdbReadConsistency, format?: DdbReadFormat): Promise<DdbRow[] | DdbExactRow[]>;
+  async callReadProcedure(
+    schemaName: string, procedure: string, args: string[] = [], consistency?: DdbReadConsistency, format?: DdbReadFormat,
+  ): Promise<DdbRow[] | DdbExactRow[]> {
+    // The token is a fourth parameter only when given, and the read format (DB-02) a fifth only when it asks
+    // for exact numbers, so an old call sends exactly what it always did.
     const params: unknown[] = [schemaName, procedure, args];
-    if (consistency) params.push(withReadToken(consistency));
-    return this.call('ddb_callReadProcedure', params);
+    if (consistency || format?.exactNumbers) params.push(consistency ? withReadToken(consistency) : null);
+    if (format?.exactNumbers) params.push({ exactNumbers: true });
+    const res = await this.call('ddb_callReadProcedure', params);
+    return format?.exactNumbers ? ddbExactRows('ddb_callReadProcedure', res).rows : res;
   }
 
   /**
@@ -1867,6 +1982,9 @@ export class Ddb {
    * travels as a second parameter beside the envelope; it only makes the node wait for, or refuse, a read
    * the signature already authorizes, so the signed bytes are the same with or without it.
    */
+  signedCallReadProcedure(signer: DdbSignerLike, schemaName: string, procedure: string, args?: string[], opts?: DdbSignedReadProcedureOptions, consistency?: DdbReadConsistency, format?: DdbReadFormat & { exactNumbers?: false }): Promise<DdbRow[]>;
+  signedCallReadProcedure(signer: DdbSignerLike, schemaName: string, procedure: string, args: string[] | undefined, opts: DdbSignedReadProcedureOptions | undefined, consistency: DdbReadConsistency | undefined, format: DdbReadFormat & { exactNumbers: true }): Promise<DdbExactRow[]>;
+  signedCallReadProcedure(signer: DdbSignerLike, schemaName: string, procedure: string, args?: string[], opts?: DdbSignedReadProcedureOptions, consistency?: DdbReadConsistency, format?: DdbReadFormat): Promise<DdbRow[] | DdbExactRow[]>;
   async signedCallReadProcedure(
     signer: DdbSignerLike,
     schemaName: string,
@@ -1874,7 +1992,8 @@ export class Ddb {
     args: string[] = [],
     opts: DdbSignedReadProcedureOptions = {},
     consistency?: DdbReadConsistency,
-  ): Promise<DdbRow[]> {
+    format?: DdbReadFormat,
+  ): Promise<DdbRow[] | DdbExactRow[]> {
     const s = toDdbSigner(signer);
     const chainId = opts.chainId ?? (await this.call('eth_chainId'));
     const prepared = buildDdbSignedReadProcedure(
@@ -1883,8 +2002,10 @@ export class Ddb {
     const sig = await s.signDdbHash(prepared.hash);
     const envelope: DdbSignedReadProcedureEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
     const params: unknown[] = [envelope];
-    if (consistency) params.push(withReadToken(consistency));
-    return this.call('ddb_signedCallReadProcedure', params);
+    if (consistency || format?.exactNumbers) params.push(consistency ? withReadToken(consistency) : null);
+    if (format?.exactNumbers) params.push({ exactNumbers: true }); // DB-02: unsigned, like the token
+    const res = await this.call('ddb_signedCallReadProcedure', params);
+    return format?.exactNumbers ? ddbExactRows('ddb_signedCallReadProcedure', res).rows : res;
   }
 
   // ---------------------------------------------------------------------------
