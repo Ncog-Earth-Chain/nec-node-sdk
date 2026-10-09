@@ -271,12 +271,17 @@ export async function verifyGroupDurableReceipt(receipt: GroupDurableReceipt, co
   }
 
   const members = new Map<string, { pub: Uint8Array; weight: bigint | null }>();
-  for (const m of committee.members) {
-    members.set(lc(m.address), {
-      pub: toBytes(m.publicKey ?? ''),
-      weight: m.weight === undefined || m.weight === null ? null : toBig(m.weight),
-    });
+  try {
+    for (const m of committee.members) {
+      members.set(lc(m.address), {
+        pub: toBytes(m.publicKey ?? ''),
+        weight: m.weight === undefined || m.weight === null ? null : toBig(m.weight),
+      });
+    }
+  } catch (e: any) {
+    return no(`malformed committee: ${e?.message ?? e}`);
   }
+  if (!Array.isArray(receipt.signatures)) return no('malformed receipt: no signatures array');
 
   const mldsa = await getMldsa();
   const seen = new Set<string>();

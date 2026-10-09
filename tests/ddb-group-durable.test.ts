@@ -76,6 +76,22 @@ describe('DB-08 group-durability receipt: the rules, named', () => {
     expect((await judge(byName('below the distinct-signer floor'))).reason).toMatch(/below the floor of 2/);
   });
 
+  test('a repeated signer and a non-member each fail the receipt on their own rule', async () => {
+    expect((await judge(byName('duplicate signer'))).reason).toMatch(/duplicate receipt signature/);
+    expect((await judge(byName('non-member signer'))).reason).toMatch(/no committee pubkey/);
+  });
+
+  test('malformed input is a verdict, never a throw', async () => {
+    const c = byName('valid: weight quorum');
+    const noSigs = { ...c.receipt, signatures: undefined } as any;
+    expect((await judge(c, noSigs)).reason).toMatch(/no signatures array/);
+    const bad = { ...committee, networkId: c.networkId, epoch: c.expectedEpoch,
+      members: [{ ...committee.members[0], weight: 'not-a-number' }] } as any;
+    const v = await verifyGroupDurableReceipt(c.receipt, bad);
+    expect(v.valid).toBe(false);
+    expect(v.reason).toMatch(/malformed committee/);
+  });
+
   test('a forged signature fails the receipt', async () => {
     expect((await judge(byName('forged signature'))).reason).toMatch(/does not verify/);
   });
