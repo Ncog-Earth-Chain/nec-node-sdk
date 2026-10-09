@@ -211,6 +211,18 @@ export function decodeGroupDurableReceiptRlp(data: Bytesish): GroupDurableReceip
   };
 }
 
+/**
+ * The committee from ddb_getDdbValidators' DB-08 view ({committee: true}): what {@link verifyGroupDurableReceipt}
+ * takes. Throws when the result carries no committee (a node without DB-08, or the opt-in not sent).
+ */
+export function ddbCommitteeFromRpc(r: any): DdbCommittee {
+  if (!r || !Array.isArray(r.committee)) throw new Error('this node does not serve the DB-08 committee view');
+  return {
+    epoch: r.epoch, networkId: r.networkId, threshold: r.threshold, minSigners: r.minSigners ?? 0,
+    members: r.committee.map((m: any) => ({ address: m.address, publicKey: m.publicKey ?? '', weight: m.weight ?? undefined })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // verification
 // ---------------------------------------------------------------------------

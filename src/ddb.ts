@@ -2,7 +2,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
 import { randomBytes } from '@noble/hashes/utils';
 import { Provider } from './provider';
 import { type ContractDefinition, validateContractDefinition } from './ddb-schema';
-import { type DdbCommittee, type GroupDurableReceipt } from './ddb-group-durable';
+import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
 // `(string & {})` arm keeps autocomplete on the known ops while still accepting any forward-compatible op.
@@ -1938,12 +1938,7 @@ export class Ddb {
    * word. Pin the committee from a node (or a chain read) you trust.
    */
   async getDdbCommittee(): Promise<DdbCommittee> {
-    const r: any = await this.call('ddb_getDdbValidators', [{ committee: true }]);
-    if (!r || !Array.isArray(r.committee)) throw new Error('this node does not serve the DB-08 committee view');
-    return {
-      epoch: r.epoch, networkId: r.networkId, threshold: r.threshold, minSigners: r.minSigners ?? 0,
-      members: r.committee.map((m: any) => ({ address: m.address, publicKey: m.publicKey ?? '', weight: m.weight ?? undefined })),
-    };
+    return ddbCommitteeFromRpc(await this.call('ddb_getDdbValidators', [{ committee: true }]));
   }
 
   /** Endorsement status for a request id (the value returned by the *Signed write methods). */
