@@ -207,6 +207,27 @@ default node, and warns once per process. Use the `*Signed` equivalents instead.
 - **Signature:** `query(schemaName: string, tableName: string, limit?: number): Promise<DdbRow[]>`
 - **Params:** `limit` defaults to `100`. A simple unfiltered fetch of up to `limit` rows.
 
+#### Exact int64 reads: `exactNumbers` (DB-02, opt-in)
+
+A plain read returns a `bigint` (int8) column as a JSON number, so any value beyond 2^53 is ROUNDED by
+`JSON.parse` (2^53+1 reads back as 2^53; -2^63 and 2^63-1 are not representable). Ask for the exact form:
+
+```ts
+const rows = await ddb.select(db, 'nums', { exactNumbers: true });     // also selectVersioned / signedSelect
+const q    = await ddb.query(db, 'nums', 100, undefined, { exactNumbers: true });
+const p    = await ddb.callReadProcedure(db, 'stats', ['1'], undefined, { exactNumbers: true });
+// signedCallReadProcedure(signer, db, proc, args, opts, consistency, { exactNumbers: true })
+rows[0].big; // 9007199254740993n -- a bigint
+```
+
+- int8 columns (including `count(*)` and other int8 results) are `bigint`; NULL stays `null`.
+- numeric columns stay decimal strings (they always were); int4/int2 stay numbers; a text column that holds
+  digits stays a string -- the node reports each column's type, and only int8 is converted.
+- Without the flag nothing changes: the same request bytes go to the node and the same rows come back.
+- A node that predates the flag answers the plain rows; the SDK then throws an error with
+  `code === DDB_EXACT_NUMBERS_UNSUPPORTED` instead of returning possibly-rounded values as exact.
+- `ddbExactRows(method, response)` decodes the node's `{columns, rows}` answer for callers with their own transport.
+
 ### Status / introspection
 
 | Method | Signature | Returns |

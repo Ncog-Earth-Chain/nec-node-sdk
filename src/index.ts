@@ -21,6 +21,8 @@ export {
   type DdbFilter, type DdbFilterOp, type DdbQueryOptions, type DdbSignOptions,
   type DdbRow, type DdbSchemaInfo, type DdbEndorsementStatus, type DdbConsensusStats,
   type DdbValidatorSet, type DdbStorageStats,
+  // DB-02 (NEC-78), owner ruling 17: opt-in exact int8 reads (bigint), see DdbReadFormat.
+  ddbExactRows, DDB_EXACT_NUMBERS_UNSUPPORTED, type DdbReadFormat, type DdbExactRow, type DdbReadColumn,
   // DB-01 transactions (NEC-77): one caller's atomic batch on one database, with a read set.
   buildDdbTransaction, canonicalDdbTxnId, canonicalDdbTxnMemberHash, isRetryableDdbTxnSkip,
   DDB_TXN_MAX_OPS, DDB_TXN_MAX_READS,
