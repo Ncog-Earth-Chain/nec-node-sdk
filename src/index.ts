@@ -35,6 +35,12 @@ export {
   type DdbProcedureDef, type DdbParameterDef, type DdbPointWrite, type DdbPKBinding, type DdbGasPolicy,
   isRowLockEligible, validateContractDefinition, validatePointWrite, tablePKColumns, isMutatingBody, maskSQLLiterals,
 } from './ddb-schema';
+// DB-08 (NEC-83): verify a durable-to-group receipt against the epoch committee (approve quorum by weight).
+export {
+  verifyGroupDurableReceipt, groupDurableDigest, decodeGroupDurableReceiptRlp, GROUP_DURABLE_DOMAIN,
+  type GroupDurableReceipt, type GroupDurableSignature, type DdbCommittee, type DdbCommitteeMember,
+  type GroupDurableVerifyOptions, type GroupDurableVerdict,
+} from './ddb-group-durable';
 export { Wallet, Signer, type TxParams } from './wallet';
 // Transaction signer (SigVersion-v2 ML-DSA-87; chainId is always bound — no wire-format toggles).
 export {

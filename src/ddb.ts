@@ -2,6 +2,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
 import { randomBytes } from '@noble/hashes/utils';
 import { Provider } from './provider';
 import { type ContractDefinition, validateContractDefinition } from './ddb-schema';
+import { type DdbCommittee, type GroupDurableReceipt } from './ddb-group-durable';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
 // `(string & {})` arm keeps autocomplete on the known ops while still accepting any forward-compatible op.
@@ -109,6 +110,13 @@ export interface DdbSignOptions {
   expiry?: number | bigint;
   /** v2 only. The signing key's version, signed as an assertion (the node does not enforce it yet). Defaults to 0. */
   keyVersion?: number | bigint;
+  /**
+   * DB-08: ask the node for the durable-to-group receipt (ddb_submitSignedOp's `{groupDurableReceipt: true}`).
+   * The submit result then carries `operationHash` and, when the fast path acknowledged the write,
+   * `groupDurableReceipt` (+ its RLP). Verify it with verifyGroupDurableReceipt against a committee you
+   * trust. A node without DB-08 refuses the extra parameter, so leave this off for such a node.
+   */
+  groupDurableReceipt?: boolean;
 }
 
 /** The DDB operation preimage versions this SDK can sign. */
@@ -964,6 +972,29 @@ export interface DdbSubmitReceipt {
   requestId: string;
   /** The commit transaction hash the node returned. Feed it to getCommitStatus / waitForCommit. */
   commitTxHash: string;
+  /** DB-08, only with `groupDurableReceipt: true`: the operation hash the endorsement and the receipt name. */
+  operationHash?: string;
+  /**
+   * DB-08, only with `groupDurableReceipt: true` AND only when the fast path acknowledged the write: an
+   * approve quorum of the epoch committee holds it durably, and it will anchor (or the op's expiry plus the
+   * anchor deadline passes first). Absent: today's path -- wait for the commit.
+   */
+  groupDurableReceipt?: GroupDurableReceipt;
+  /** The same receipt in its RLP form (decodeGroupDurableReceiptRlp). */
+  groupDurableReceiptRlp?: string;
+}
+
+/** ddb_submitSignedOp's result, either form, as a DdbSubmitReceipt. */
+function submitResult(requestId: string, res: any): DdbSubmitReceipt {
+  if (typeof res === 'string') return { requestId, commitTxHash: res };
+  if (res && typeof res === 'object') {
+    const out: DdbSubmitReceipt = { requestId, commitTxHash: typeof res.commitTxHash === 'string' ? res.commitTxHash : '' };
+    if (typeof res.operationHash === 'string') out.operationHash = res.operationHash;
+    if (res.groupDurableReceipt) out.groupDurableReceipt = res.groupDurableReceipt;
+    if (typeof res.groupDurableReceiptRlp === 'string') out.groupDurableReceiptRlp = res.groupDurableReceiptRlp;
+    return out;
+  }
+  return { requestId, commitTxHash: '' };
 }
 
 /** ddb_getCommitStatus result (mirrors PublicDdbAPI.GetCommitStatus). */
@@ -1506,14 +1537,16 @@ export class Ddb {
     // the EIP-191 personal-message prefix on the way through a wallet.
     const sig = await signer.signDdbHash(prepared.hash);
 
-    const commitTxHash = await this.call(
-      'ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) }],
-    );
+    // DB-08: the receipt opt-in is a SECOND parameter, sent only when asked for, so the default call is
+    // byte-identical to what every earlier SDK sends.
+    const params: any[] = [{ ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) }];
+    if (opts.groupDurableReceipt) params.push({ groupDurableReceipt: true });
+    const res = await this.call('ddb_submitSignedOp', params);
 
     // Both handles. ddb_submitSignedOp returns proof.CommitTxHash (ethapi/ddb_api.go); this used to be
     // awaited and thrown away, which left ddb_getCommitStatus -- the ONLY RPC that can report a
     // deterministic skip -- unreachable from any client, because its sole parameter is that hash.
-    return { requestId: prepared.requestId, commitTxHash: typeof commitTxHash === 'string' ? commitTxHash : '' };
+    return submitResult(prepared.requestId, res);
   }
 
   /**
@@ -1529,10 +1562,12 @@ export class Ddb {
    * As {@link submitSignedOp}, but returns the commit tx hash alongside the requestId. Use this one
    * unless you have a caller that depends on the bare-string return.
    */
-  async submitSignedOpDetailed(prepared: DdbPreparedOp, signature: Uint8Array | string): Promise<DdbSubmitReceipt> {
+  async submitSignedOpDetailed(prepared: DdbPreparedOp, signature: Uint8Array | string,
+    opts: { groupDurableReceipt?: boolean } = {}): Promise<DdbSubmitReceipt> {
     const sig = typeof signature === 'string' ? signature : '0x' + ddbBytesToHex(signature);
-    const commitTxHash = await this.call('ddb_submitSignedOp', [{ ...prepared.envelope, callerSig: sig }]);
-    return { requestId: prepared.requestId, commitTxHash: typeof commitTxHash === 'string' ? commitTxHash : '' };
+    const params: any[] = [{ ...prepared.envelope, callerSig: sig }];
+    if (opts.groupDurableReceipt) params.push({ groupDurableReceipt: true });
+    return submitResult(prepared.requestId, await this.call('ddb_submitSignedOp', params));
   }
 
   /**
@@ -1894,6 +1929,21 @@ export class Ddb {
   /** The current DDB validator committee + BFT threshold. */
   getValidators(): Promise<DdbValidatorSet> {
     return this.call('ddb_getDdbValidators');
+  }
+
+  /**
+   * DB-08: the current committee as a group-durability receipt verifier needs it -- keys, weights, epoch,
+   * signer floor, network id (ddb_getDdbValidators {committee: true}). This is THIS node's view: checking
+   * a receipt against the committee served by the node that served the receipt proves only that node's
+   * word. Pin the committee from a node (or a chain read) you trust.
+   */
+  async getDdbCommittee(): Promise<DdbCommittee> {
+    const r: any = await this.call('ddb_getDdbValidators', [{ committee: true }]);
+    if (!r || !Array.isArray(r.committee)) throw new Error('this node does not serve the DB-08 committee view');
+    return {
+      epoch: r.epoch, networkId: r.networkId, threshold: r.threshold, minSigners: r.minSigners ?? 0,
+      members: r.committee.map((m: any) => ({ address: m.address, publicKey: m.publicKey ?? '', weight: m.weight ?? undefined })),
+    };
   }
 
   /** Endorsement status for a request id (the value returned by the *Signed write methods). */
