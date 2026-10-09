@@ -226,6 +226,9 @@ rows[0].big; // 9007199254740993n -- a bigint
 - Without the flag nothing changes: the same request bytes go to the node and the same rows come back.
 - A node that predates the flag answers the plain rows; the SDK then throws an error with
   `code === DDB_EXACT_NUMBERS_UNSUPPORTED` instead of returning possibly-rounded values as exact.
+- A reply whose rows carry a key the `columns` list does not name is refused (that value was not rendered
+  exactly), and so is a result where two columns share a name with different types (a join's two `id`s):
+  alias one of them in the query.
 - `ddbExactRows(method, response)` decodes the node's `{columns, rows}` answer for callers with their own transport.
 
 ### Status / introspection

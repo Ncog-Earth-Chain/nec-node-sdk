@@ -21,7 +21,7 @@ export {
   type DdbRow, type DdbSchemaInfo, type DdbEndorsementStatus, type DdbConsensusStats,
   type DdbValidatorSet, type DdbStorageStats,
   // DB-02 (NEC-78), owner ruling 17: opt-in exact int8 reads (bigint), see DdbReadFormat.
-  ddbExactRows, DDB_EXACT_NUMBERS_UNSUPPORTED, type DdbReadFormat, type DdbExactRow, type DdbReadColumn,
+  ddbExactRows, DDB_EXACT_NUMBERS_UNSUPPORTED, type DdbReadFormat, type DdbExactRow, type DdbReadColumn, type DdbExactVersionedRows,
 } from './ddb';
 export {
   type ContractDefinition, type DdbSchemaDef, type DdbTableDef, type DdbColumnDef, type DdbIndexDef,

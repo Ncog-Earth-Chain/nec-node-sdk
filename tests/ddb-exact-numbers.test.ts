@@ -7,7 +7,7 @@
 //
 // MUTANT (red here): drop the flag on the SDK path (select sends opts without exactNumbers, or ddbExactRows
 // leaves int8 strings alone) -> the bigint cases fail.
-import { Ddb, ddbExactRows, DDB_EXACT_NUMBERS_UNSUPPORTED } from '../src/ddb';
+import { Ddb, ddbExactRows, DDB_EXACT_NUMBERS_UNSUPPORTED, DdbSigner } from '../src/ddb';
 
 // BigInt(...) rather than 123n literals: the SDK targets below ES2020.
 const TWO53_PLUS_1 = BigInt('9007199254740993');
@@ -100,5 +100,47 @@ describe('DB-02 exactNumbers (opt-in exact int8)', () => {
       .toThrow(/not a decimal string/);
     expect(() => ddbExactRows('ddb_select', { columns: [{ name: 'n', type: 'int8' }], rows: [{ n: '1e3' }] }))
       .toThrow(/not a decimal string/);
+  });
+  // Verifier findings (run 15): the signed read paths, and replies a node should never send but the SDK must not
+  // pass through as exact.
+  const signer: DdbSigner = {
+    getAddress: () => '0x00000000000000000000000000000000000000a1',
+    getPublicKey: () => new Uint8Array(4),
+    signDdbHash: (h) => h,
+  };
+
+  it('signedSelect and signedCallReadProcedure decode exactNumbers, and send the flag unsigned', async () => {
+    const { ddb, sent } = mock({ ddb_signedSelect: EXACT_WIRE, ddb_signedCallReadProcedure: EXACT_WIRE });
+    const rows = await ddb.signedSelect(signer, 'c_num', 'nums', { exactNumbers: true }, { chainId: 1 });
+    expect(sent[0].params[1]).toEqual({ exactNumbers: true });
+    expect(rows.map((r) => r.big)).toEqual([TWO53_PLUS_1, INT64_MIN, INT64_MAX, null]);
+    const p = await ddb.signedCallReadProcedure(signer, 'c_num', 'stats', ['1'], { chainId: 1 }, undefined, { exactNumbers: true });
+    expect(sent[1].params.slice(1)).toEqual([null, { exactNumbers: true }]);
+    expect(p[2].big).toBe(INT64_MAX);
+    expect(p[0].id).toBe(BigInt(1));
+  });
+
+  it('the signed paths without the flag send and return what they always did', async () => {
+    const { ddb, sent } = mock({ ddb_signedSelect: DEFAULT_WIRE, ddb_signedCallReadProcedure: DEFAULT_WIRE });
+    const rows = await ddb.signedSelect(signer, 'c_num', 'nums', {}, { chainId: 1 });
+    expect(sent[0].params[1]).toEqual({});
+    expect(rows[0].big).toBe(9007199254740992);
+    await ddb.signedCallReadProcedure(signer, 'c_num', 'stats', ['1'], { chainId: 1 });
+    expect(sent[1].params.length).toBe(1);
+  });
+
+  it('ddbExactRows refuses a row key the columns list does not name (its value may already be rounded)', () => {
+    expect(() => ddbExactRows('ddb_select', JSON.parse('{"columns":[],"rows":[{"big":9007199254740993}]}')))
+      .toThrow(/not in the reply's columns/);
+    expect(() => ddbExactRows('ddb_select', { columns: [{ name: 'id', type: 'int8' }], rows: [{ id: '1', big: 2 }] }))
+      .toThrow(/"big" is not in the reply's columns/);
+  });
+
+  it('ddbExactRows refuses a name that two columns of different types share (a join): which value is which is unknowable', () => {
+    const res = { columns: [{ name: 'id', type: 'int8' }, { name: 'id', type: 'text' }], rows: [{ id: 'abc' }] };
+    expect(() => ddbExactRows('ddb_select', res)).toThrow(/two columns named "id"/);
+    // The same name with the same type is unambiguous for the conversion.
+    const same = { columns: [{ name: 'id', type: 'int8' }, { name: 'id', type: 'int8' }], rows: [{ id: '5' }] };
+    expect(ddbExactRows('ddb_select', same).rows[0].id).toBe(BigInt(5));
   });
 });

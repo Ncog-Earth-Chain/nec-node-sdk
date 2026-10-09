@@ -78,8 +78,26 @@ export function ddbExactRows(method: string, res: unknown): { rows: DdbExactRow[
     throw err;
   }
   const columns = r.columns as DdbReadColumn[];
-  const int8 = columns.filter((c) => c && c.type === 'int8').map((c) => c.name);
+  // Every row key must be a reported column, and a name two columns share (a join's two `id`s) must have one
+  // type: a row map keeps one value per name, so otherwise which value is int8 is unknowable. A key the columns
+  // list does not name is a value the node never rendered under exact mode -- it may already be rounded.
+  const typeOf = new Map<string, string>();
+  for (const c of columns) {
+    const prev = typeOf.get(c?.name);
+    if (prev !== undefined && prev !== c.type) {
+      throw new Error(`${method}: two columns named ${JSON.stringify(c.name)} (${prev}, ${c.type}); alias one ` +
+        `in the query -- refusing to guess which value is exact`);
+    }
+    typeOf.set(c?.name, c?.type);
+  }
+  const int8 = [...typeOf].filter(([, t]) => t === 'int8').map(([n]) => n);
   const rows = (r.rows as DdbExactRow[]).map((row) => {
+    for (const k of Object.keys(row ?? {})) {
+      if (!typeOf.has(k)) {
+        throw new Error(`${method}: row key ${JSON.stringify(k)} is not in the reply's columns; refusing to ` +
+          `return it as exact`);
+      }
+    }
     const out: DdbExactRow = { ...row };
     for (const name of int8) {
       const v = out[name];
@@ -131,6 +149,13 @@ export interface DdbVersionedRows {
   dataVersion: string;
   /** Present only for an `exactNumbers` read (DB-02): the result's columns and their types. */
   columns?: DdbReadColumn[];
+}
+
+/** ddb_selectVersioned read with `exactNumbers` (DB-02): int8 columns are `bigint`, and the columns are present. */
+export interface DdbExactVersionedRows {
+  rows: DdbExactRow[];
+  dataVersion: string;
+  columns: DdbReadColumn[];
 }
 
 // Options for the client-signed DDB write methods. Both fields are part of the signed
@@ -1870,7 +1895,9 @@ export class Ddb {
    * ddb_select that also returns `dataVersion`, the applied version the rows reflect at least (DB-03).
    * Takes the same `minVersion`/`waitMs` token as select.
    */
-  async selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows> {
+  selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions & { exactNumbers: true }): Promise<DdbExactVersionedRows>;
+  selectVersioned(schemaName: string, tableName: string, opts?: DdbQueryOptions): Promise<DdbVersionedRows>;
+  async selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows | DdbExactVersionedRows> {
     const res = await this.call('ddb_selectVersioned', [schemaName, tableName, withReadToken(opts)]);
     if (!opts?.exactNumbers) return res;
     const { rows, columns } = ddbExactRows('ddb_selectVersioned', res && res.columns ? res : [res]);
@@ -1904,13 +1931,15 @@ export class Ddb {
    * Signed: chain id, schema, table, `readOpts.joinTables`, from, timestamp, nonce. NOT signed: `query`
    * (filters, joins, ordering, limit), which travels beside the envelope. Each signed read is single use.
    */
+  signedSelect(signer: DdbSignerLike, schemaName: string, tableName: string, query: DdbQueryOptions & { exactNumbers: true }, readOpts?: DdbSignedReadOptions): Promise<DdbExactRow[]>;
+  signedSelect(signer: DdbSignerLike, schemaName: string, tableName: string, query?: DdbQueryOptions | Record<string, unknown>, readOpts?: DdbSignedReadOptions): Promise<DdbRow[]>;
   async signedSelect(
     signer: DdbSignerLike,
     schemaName: string,
     tableName: string,
     query: DdbQueryOptions | Record<string, unknown> = {},
     readOpts: DdbSignedReadOptions = {},
-  ): Promise<DdbRow[]> {
+  ): Promise<DdbRow[] | DdbExactRow[]> {
     const s = toDdbSigner(signer);
     const chainId = readOpts.chainId ?? (await this.call('eth_chainId'));
     const prepared = buildDdbSignedRead(
@@ -1953,6 +1982,9 @@ export class Ddb {
    * travels as a second parameter beside the envelope; it only makes the node wait for, or refuse, a read
    * the signature already authorizes, so the signed bytes are the same with or without it.
    */
+  signedCallReadProcedure(signer: DdbSignerLike, schemaName: string, procedure: string, args?: string[], opts?: DdbSignedReadProcedureOptions, consistency?: DdbReadConsistency, format?: DdbReadFormat & { exactNumbers?: false }): Promise<DdbRow[]>;
+  signedCallReadProcedure(signer: DdbSignerLike, schemaName: string, procedure: string, args: string[] | undefined, opts: DdbSignedReadProcedureOptions | undefined, consistency: DdbReadConsistency | undefined, format: DdbReadFormat & { exactNumbers: true }): Promise<DdbExactRow[]>;
+  signedCallReadProcedure(signer: DdbSignerLike, schemaName: string, procedure: string, args?: string[], opts?: DdbSignedReadProcedureOptions, consistency?: DdbReadConsistency, format?: DdbReadFormat): Promise<DdbRow[] | DdbExactRow[]>;
   async signedCallReadProcedure(
     signer: DdbSignerLike,
     schemaName: string,
