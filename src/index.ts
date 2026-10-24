@@ -18,7 +18,7 @@ export {
   // second is the only input ddb_getCommitStatus accepts, and that RPC is the only one that can report
   // a deterministic skip -- see DdbSubmitReceipt.
   type DdbSubmitReceipt, type DdbCommitStatus,
-  type DdbFilter, type DdbFilterOp, type DdbQueryOptions, type DdbSignOptions,
+  type DdbFilter, type DdbFilterOp, type DdbQueryOptions, type DdbSignOptions, type DdbUpdateSchemaOptions,
   type DdbRow, type DdbSchemaInfo, type DdbEndorsementStatus, type DdbConsensusStats,
   type DdbValidatorSet, type DdbStorageStats,
   // DB-02 (NEC-78), owner ruling 17: opt-in exact int8 reads (bigint), see DdbReadFormat.
@@ -36,6 +36,8 @@ export {
   type ContractDefinition, type DdbSchemaDef, type DdbTableDef, type DdbColumnDef, type DdbIndexDef,
   type DdbProcedureDef, type DdbParameterDef, type DdbPointWrite, type DdbPKBinding, type DdbGasPolicy,
   isRowLockEligible, validateContractDefinition, validatePointWrite, tablePKColumns, isMutatingBody, maskSQLLiterals,
+  // DB-02i (NEC-189): the supersedes list of a retyping upgrade (under ddb-signature-supersede).
+  type DdbSupersededSignature, type DdbSupersedesOptions, deriveSupersedes, validateSupersedes, withSupersedes,
 } from './ddb-schema';
 // DB-08 (NEC-83): verify a durable-to-group receipt against the epoch committee (approve quorum by weight).
 export {

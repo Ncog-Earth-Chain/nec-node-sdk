@@ -96,6 +96,30 @@ export interface ContractDefinition {
   gas_policy?: DdbGasPolicy;
   block_info?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  /**
+   * UPGRADE ONLY (DB-02i, NEC-189): the procedure signatures this upgrade retypes away -- see
+   * {@link DdbSupersededSignature}, {@link deriveSupersedes} and {@link withSupersedes}. Honoured only on a network
+   * running `ddb-signature-supersede` (Upgrades3 slot 7, gated); elsewhere a node refuses an upgrade carrying a
+   * non-empty list, and a deploy carrying one is refused everywhere. The node reads it from the signed operation
+   * data only: it is never stored in the contract's definition.
+   */
+  supersedes?: DdbSupersededSignature[];
+}
+
+/**
+ * One entry of an upgrade's `supersedes` list (DB-02i, NEC-189; mirrors ddbschema.SupersededSignature): a procedure
+ * signature the DEPLOYED version declares and the upgrade drops. `name` is the procedure's name exactly as deployed
+ * (case included: the node quotes it); `params` are its OLD parameter TYPES in order (`[]` for none) -- parameter
+ * names are not part of a Postgres signature.
+ *
+ * Under `ddb-signature-supersede` every endorser requires the list to EQUAL the change set against the deployed
+ * definition (no entry missing, no extra entry, the deployed types), and the upgrade's DDL then runs
+ * `DROP FUNCTION IF EXISTS "<db>"."<name>"(<old types>)` for each entry before the procedures' CREATE OR REPLACE, so
+ * after the upgrade the declared function is the only one a call can reach.
+ */
+export interface DdbSupersededSignature {
+  name: string;
+  params: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -220,5 +244,142 @@ export function validateContractDefinition(contract: ContractDefinition): { elig
     if (!proc.point_write && isMutatingBody(proc.body)) eligible = false; // a predicate mutator
     if (proc.point_write && e.length) eligible = false; // a broken point op
   }
+  errors.push(...validateSupersedes(contract.supersedes)); // DB-02i: the node parses the list strictly
   return { eligible, errors };
+}
+
+// ---------------------------------------------------------------------------
+// DB-02i (NEC-189): the `supersedes` list of a retyping upgrade (ddb/ddbschema/procedure_supersede.go)
+// ---------------------------------------------------------------------------
+
+const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/; // ddbschema.identRe
+
+function sameSignature(a: DdbSupersededSignature, b: DdbSupersededSignature): boolean {
+  return a.name === b.name && a.params.length === b.params.length &&
+    a.params.every((t, i) => t.toLowerCase() === b.params[i].toLowerCase());
+}
+
+function signatureString(s: DdbSupersededSignature): string {
+  return `${JSON.stringify(s.name)}(${s.params.join(', ')})`;
+}
+
+/**
+ * Validate a `supersedes` value the way the node parses it (ddbschema.ParseSupersedes): absent, `null` and `[]` are no
+ * list; anything else must be an array of `{ name, params }` objects with no other key, a valid procedure identifier,
+ * `params` an array of type strings (required: `[]` for none), and no signature listed twice (types compared without
+ * regard to case). Returns the errors, empty when valid. The node re-validates authoritatively (including the
+ * column-type allow-list) at endorsement.
+ */
+export function validateSupersedes(list: unknown): string[] {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) return ['"supersedes" must be an array of {"name", "params"} entries'];
+  const errors: string[] = [];
+  const seen: DdbSupersededSignature[] = [];
+  list.forEach((e, i) => {
+    const at = `supersedes entry ${i + 1}`;
+    if (e === null || typeof e !== 'object' || Array.isArray(e)) { errors.push(`${at}: must be an object {"name", "params"}`); return; }
+    for (const k of Object.keys(e)) if (k !== 'name' && k !== 'params') errors.push(`${at}: unknown key ${JSON.stringify(k)}`);
+    const { name, params } = e as { name?: unknown; params?: unknown };
+    if (typeof name !== 'string' || !IDENT_RE.test(name)) {
+      errors.push(`${at}: invalid procedure identifier ${JSON.stringify(name)} (must match [A-Za-z_][A-Za-z0-9_]{0,62})`);
+      return;
+    }
+    if (params === undefined || params === null) { errors.push(`${at} (${JSON.stringify(name)}): "params" is required (the old parameter types, [] for none)`); return; }
+    if (!Array.isArray(params) || params.some((t) => typeof t !== 'string' || t.trim() === '')) {
+      errors.push(`${at} (${JSON.stringify(name)}): "params" must be an array of parameter type strings`);
+      return;
+    }
+    const sig: DdbSupersededSignature = { name, params: params as string[] };
+    const j = seen.findIndex((s) => sameSignature(s, sig));
+    if (j >= 0) errors.push(`supersedes lists ${signatureString(sig)} twice (entries ${j + 1} and ${i + 1})`);
+    seen.push(sig);
+  });
+  return errors;
+}
+
+/**
+ * The `supersedes` list an upgrade from `deployed` to `next` must carry (mirrors ddbschema.SupersededSignatures, the
+ * change set every endorser compares the list with): every deployed procedure signature the new version leaves
+ * undeclared. Per (name folded to lower case, parameter count): when `next` re-declares one of the deployed
+ * declarations there UNCHANGED -- the same name exactly, the same parameter names exactly, the same types (case
+ * aside) -- nothing there is superseded; otherwise every deployed declaration there is. So a changed type, a renamed
+ * parameter, an added or removed parameter or a changed name case each supersede the old signature, while a body
+ * change or a new overload at another parameter count supersedes nothing. In deployed declaration order, each
+ * signature once. Pure: it reads the two definitions only.
+ *
+ * `deployed` must be the definition the network actually holds (the contract's current version), or the endorsers
+ * refuse the list as a mismatch.
+ */
+export function deriveSupersedes(deployed: ContractDefinition, next: ContractDefinition): DdbSupersededSignature[] {
+  const key = (name: string, arity: number) => `${name.toLowerCase()}\u0000${arity}`;
+  const declared = new Map<string, DdbProcedureDef[]>();
+  for (const p of next.procedures || []) {
+    const k = key(p.name, (p.params || []).length);
+    declared.set(k, [...(declared.get(k) || []), p]);
+  }
+  const stored = deployed.procedures || [];
+  // keepsOne (procedure_signature.go): some deployed declaration at this key is re-declared unchanged.
+  const keepsOne = (k: string): boolean => stored.some((op) =>
+    key(op.name, (op.params || []).length) === k &&
+    (declared.get(k) || []).some((np) => np.name === op.name && (np.params || []).length === (op.params || []).length &&
+      (op.params || []).every((pa, i) => pa.name === np.params[i].name && pa.type.toLowerCase() === np.params[i].type.toLowerCase())));
+  const kept = new Map<string, boolean>();
+  const out: DdbSupersededSignature[] = [];
+  for (const op of stored) {
+    const k = key(op.name, (op.params || []).length);
+    if (!kept.has(k)) kept.set(k, keepsOne(k));
+    if (kept.get(k)) continue;
+    const sig: DdbSupersededSignature = { name: op.name, params: (op.params || []).map((p) => p.type) };
+    if (!out.some((o) => sameSignature(o, sig))) out.push(sig);
+  }
+  return out;
+}
+
+/** Options of {@link withSupersedes} (and of Ddb.updateSchemaSigned). */
+export interface DdbSupersedesOptions {
+  /** The list to sign, as is. With `deployed` too, it must equal the derived list. `[]` signs no list. */
+  supersedes?: DdbSupersededSignature[];
+  /** The definition the network holds now: the list is derived from it and the new definition (deriveSupersedes). */
+  deployed?: ContractDefinition;
+}
+
+/**
+ * `definition` (a typed object or its JSON string) with the `supersedes` key set from `opts`: the explicit list, or
+ * the one derived from `opts.deployed`, or -- both given -- the explicit list after checking it equals the derived one
+ * (the endorsers' rule, ddbschema.CheckSupersedes). An EMPTY result leaves the key absent, so an upgrade that retypes
+ * nothing is byte-identical to what an earlier SDK signs and stays valid on a network without
+ * `ddb-signature-supersede`. Throws on a malformed or mismatched list, or when `definition` already carries the key.
+ * Returns a new object; the inputs are not modified.
+ */
+export function withSupersedes(definition: string | ContractDefinition, opts: DdbSupersedesOptions): ContractDefinition {
+  const def: ContractDefinition = typeof definition === 'string' ? JSON.parse(definition) : { ...definition };
+  if (def.supersedes !== undefined) {
+    throw new Error('the definition already carries "supersedes": pass the list either inside the definition or as an option, not both');
+  }
+  let list = opts.supersedes;
+  if (list !== undefined) {
+    const errs = validateSupersedes(list);
+    if (errs.length) throw new Error(`invalid supersedes list:\n  - ${errs.join('\n  - ')}`);
+  }
+  if (opts.deployed) {
+    const derived = deriveSupersedes(opts.deployed, def);
+    if (list === undefined) {
+      list = derived;
+    } else if (list.length !== derived.length || !list.every((l) => derived.some((d) => sameSignature(d, l)))) {
+      throw new Error(`supersedes ${JSON.stringify(list)} does not match the signatures this upgrade leaves undeclared ` +
+        `against the deployed definition: ${JSON.stringify(derived)} (every endorser refuses a mismatch)`);
+    }
+  }
+  if (list && list.length) def.supersedes = list.map((s) => ({ name: s.name, params: [...s.params] }));
+  return def;
+}
+
+/** Whether a definition (typed or JSON) carries a NON-EMPTY supersedes list -- which a deploy never may. */
+export function carriesSupersedes(definition: string | ContractDefinition): boolean {
+  let def: unknown = definition;
+  if (typeof definition === 'string') {
+    try { def = JSON.parse(definition); } catch { return false; } // malformed JSON fails later, as before
+  }
+  const s = (def as { supersedes?: unknown } | null)?.supersedes;
+  return s !== undefined && s !== null && !(Array.isArray(s) && s.length === 0);
 }
