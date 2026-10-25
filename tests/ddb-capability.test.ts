@@ -60,3 +60,28 @@ describe('PLACE-02 capability token', () => {
       ttlSeconds: DDB_TOKEN_LIFETIME_MAX + 1 })).rejects.toThrow(/ttlSeconds/);
   });
 });
+
+describe('PLACE-02 Ddb token methods', () => {
+  test('issueCapabilityToken binds the resolved sealed epoch and tokenSelect sends the token to ddb_tokenSelect', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Ddb } = require('../src/ddb');
+    const calls: [string, any[]][] = [];
+    const provider = { send: async (m: string, p: any[]) => {
+      calls.push([m, p]);
+      if (m === 'eth_chainId') return '0x9af';
+      if (m === 'eth_getBlockByNumber') return { epoch: '0x7' };
+      if (m === 'ddb_resolveDatabase') return { epoch: 7, hostGroup: { members: [] } };
+      return [{ ok: true }];
+    } };
+    const ddb = new Ddb(provider as any);
+    const signer: DdbSigner = { getAddress: () => golden.caller, getPublicKey: () => new Uint8Array([1]), signDdbHash: () => new Uint8Array([2]) };
+    const tok = await ddb.issueCapabilityToken(signer, golden.contract, 'Reader', { ttlSeconds: 120 });
+    expect(tok).toMatchObject({ chainId: '0x9af', groupVersion: '0x7', role: 'reader' });
+    expect(Number(tok.expiry) - Number(tok.issuedAt)).toBe(120);
+    await ddb.tokenSelect(tok, 'items');
+    expect(calls[calls.length - 1][0]).toBe('ddb_tokenSelect');
+    expect(calls[calls.length - 1][1][0]).toBe(tok);
+    await ddb.tokenCallReadProcedure(tok, 'report', ['2026']);
+    expect(calls[calls.length - 1]).toEqual(['ddb_tokenCallReadProcedure', [tok, 'report', ['2026']]]);
+  });
+});

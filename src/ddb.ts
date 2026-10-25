@@ -2253,4 +2253,11 @@ export class Ddb {
   tokenSelect(token: DdbCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
     return this.call('ddb_tokenSelect', [token, tableName, withReadToken(query as DdbQueryOptions)]);
   }
+
+  /** A read-only procedure of the token's contract under a capability token (ddb_tokenCallReadProcedure). */
+  tokenCallReadProcedure(token: DdbCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
+    const params: unknown[] = [token, procedure, args];
+    if (consistency) params.push(withReadToken(consistency));
+    return this.call('ddb_tokenCallReadProcedure', params);
+  }
 }
