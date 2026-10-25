@@ -51,6 +51,42 @@ const SKIP_LEDGER = [
       'cannot be checked without a live chain -- keep it declared rather than deleted, so the day a ' +
       'live endpoint exists in CI these nine start running instead of staying invisible.',
   },
+  // The four opt-in testbed suites below were merged between a2dfa6e (the last green CI run) and
+  // ee8dee8 without entries here, so CI went red on this step on 2026-10-25 while every local run was
+  // green: the gate only runs in CI. Each is a `describe.skip` unless its environment names a running
+  // testbed (ncogearthchain scripts/run-local-testbed.sh), so on a runner they are deterministic skips.
+  {
+    file: 'ddb-group-durable.live.test.ts',
+    block: 'DB-08 live receipts',
+    count: 3,
+    why:
+      'describe.skip unless DB08_LIVE_RECEIPTS names the receipt file a testbed run wrote (DB-08, NEC-83). ' +
+      'The offline half is tests/ddb-group-durable.test.ts against tests/vectors/db08_receipt_vectors.json.',
+  },
+  {
+    file: 'ddb-json-escape.live.test.ts',
+    block: 'NEC-144 live: a deploy whose JSON carries > < &',
+    count: 2,
+    why:
+      'describe.skip unless NEC_LIVE_RPC names a node RPC: it deploys through a live node and needs its ' +
+      'endorsement and commit proof. No runner has a node.',
+  },
+  {
+    file: 'ddb-read-consistency.live.test.ts',
+    block: 'DB-03 live: two-ingress read-your-write',
+    count: 1,
+    why:
+      'describe.skip unless NEC_LIVE_RPC and NEC_LIVE_RPC_B name two ingress nodes of one testbed (DB-03, ' +
+      'NEC-79). The offline half is tests/ddb-read-consistency.test.ts.',
+  },
+  {
+    file: 'ddb-signed-read.live.test.ts',
+    block: 'REL-02 live: a reader-role contract through the SDK',
+    count: 1,
+    why:
+      'describe.skip unless NEC_LIVE_RPC names a node that server-signs for NEC_LIVE_AUTHOR (REL-02). ' +
+      'The offline half is tests/ddb-signed-read.test.ts.',
+  },
 ];
 
 // -------------------------------------------------------------------------------------------------
