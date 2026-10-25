@@ -121,7 +121,8 @@ const ddb = new Ddb(provider);
 
 ### `updateSchemaSigned(signer, schemaName, definition, opts?)`
 
-- **Signature:** `updateSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string>`
+- **Signature:** `updateSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbUpdateSchemaOptions): Promise<string>`
+  (`DdbUpdateSchemaOptions` = `DdbSignOptions` + `supersedes?` + `deployed?`, see "Retyping a procedure" below)
 - **Op type:** `updateschema` (`inter.DdbUpdateSchema` = 1).
 - **`schemaName`:** the DERIVED `db_name` (`Ddb.deriveDbName(address)`), not the contract name — unlike
   `createSchemaSigned`, this names a contract that already exists.
@@ -134,6 +135,48 @@ const ddb = new Ddb(provider);
 
 > Upgrade is the only way a deployed data contract ever changes: schema evolution is strictly
 > additive and `DdbDeleteSchema` is refused by the node. Design contracts as permanent.
+
+#### Retyping a procedure: `supersedes` (DB-02i, gated)
+
+A procedure's parameter list is fixed: the node refuses an upgrade that changes a deployed
+procedure's parameter types, parameter names, parameter count or name case, because the upgrade's
+`CREATE OR REPLACE` would leave the old function callable. The portable way is a NEW procedure name.
+
+On a network running **`ddb-signature-supersede`** (Upgrades3 slot 7; it ships FeatureNotReady and is
+scheduled by the owner through the Timelock — `nec_rules` reports it), an upgrade may retype a
+procedure in place by signing a `supersedes` list: each deployed signature the new definition leaves
+undeclared, as `{ name, params }` with the procedure's name exactly as deployed and its OLD parameter
+TYPES in order. Every endorser requires the list to equal that change set (no entry missing, no
+extra entry); the upgrade then runs `DROP FUNCTION IF EXISTS "<db>"."<name>"(<old types>)` for each
+entry before re-creating the procedures, so the declared function is the only one a call can reach.
+
+```typescript
+import { Ddb, deriveSupersedes, type ContractDefinition } from '@ncog/necjs';
+
+// deployedV1: the definition the network holds now (the contract's current version).
+const v2: ContractDefinition = { ...deployedV1, version: '2', procedures: [
+  { name: 'transfer', params: [{ name: 'from_acct', type: 'text' }, { name: 'amount', type: 'numeric' }], body: '…' },
+] };
+
+// Derive the list from the deployed and the new definitions ...
+await ddb.updateSchemaSigned(key, Ddb.deriveDbName(v2.contract_address!), v2, { deployed: deployedV1 });
+// ... or pass it explicitly (checked against `deployed` when both are given):
+await ddb.updateSchemaSigned(key, dbName, v2, { supersedes: [{ name: 'transfer', params: ['text', 'bigint'] }] });
+
+deriveSupersedes(deployedV1, v2); // [{ name: 'transfer', params: ['text', 'bigint'] }]
+```
+
+- A list that comes out **empty is not sent**: the payload is then byte-identical to what an earlier
+  SDK signs, so `deployed` is safe to pass on every upgrade.
+- A network **without** the flag refuses an upgrade carrying a non-empty list (it would land without
+  the DROP). Declare the new parameter list under a new name there.
+- A malformed list, a list that does not match `deployed`, or a definition that already carries
+  `supersedes` while an option is given, throws synchronously before any node call.
+- `createSchemaSigned` refuses a definition carrying a non-empty `supersedes`: a deploy supersedes
+  nothing.
+- Helpers (exported): `deriveSupersedes(deployed, next)`, `validateSupersedes(list): string[]`,
+  `withSupersedes(definition, { supersedes?, deployed? })`. `validateContractDefinition` also reports a
+  malformed `supersedes`.
 
 ### Writes — client-signed (production path)
 

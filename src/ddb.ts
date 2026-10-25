@@ -1,7 +1,9 @@
 import { keccak_256 } from '@noble/hashes/sha3';
 import { randomBytes } from '@noble/hashes/utils';
 import { Provider } from './provider';
-import { type ContractDefinition, validateContractDefinition } from './ddb-schema';
+import {
+  type ContractDefinition, type DdbSupersedesOptions, validateContractDefinition, withSupersedes, carriesSupersedes,
+} from './ddb-schema';
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
@@ -207,6 +209,13 @@ export interface DdbSignOptions {
    */
   groupDurableReceipt?: boolean;
 }
+
+/**
+ * Options of Ddb.updateSchemaSigned: the signing options plus the DB-02i `supersedes` list of a retyping upgrade
+ * (explicit, or derived from the `deployed` definition; see withSupersedes). Neither is part of the envelope: the
+ * list travels inside the signed definition.
+ */
+export interface DdbUpdateSchemaOptions extends DdbSignOptions, DdbSupersedesOptions {}
 
 /** The DDB operation preimage versions this SDK can sign. */
 export type DdbOpPreimageVersion = 1 | 2;
@@ -1772,6 +1781,11 @@ export class Ddb {
    * Returns the endorsement requestId (track with waitForEndorsement).
    */
   createSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
+    // DB-02i: a deploy supersedes nothing -- under ddb-signature-supersede every endorser refuses a deploy carrying a
+    // non-empty list, so it is refused here first, whatever the network runs.
+    if (carriesSupersedes(definition)) {
+      throw new Error('a deploy supersedes nothing: "supersedes" belongs to an upgrade that retypes a deployed procedure (updateSchemaSigned)');
+    }
     if (typeof definition !== 'string') {
       const { errors } = validateContractDefinition(definition);
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
@@ -1790,13 +1804,25 @@ export class Ddb {
    *
    * `definition` is the FULL new contract definition, not a diff. A typed object is validated
    * client-side first, exactly as createSchemaSigned does. Returns the endorsement requestId.
+   *
+   * RETYPING A PROCEDURE (DB-02i, NEC-189; only on a network running `ddb-signature-supersede`, Upgrades3 slot 7):
+   * a procedure's parameter list is otherwise fixed. Pass `opts.deployed` (the definition the network holds now)
+   * and the SDK signs the `supersedes` list the endorsers require -- every deployed signature the new definition
+   * leaves undeclared (deriveSupersedes) -- or pass `opts.supersedes` explicitly (checked against `deployed` when
+   * both are given). The node then drops exactly those signatures before re-creating the procedures. A list that
+   * comes out EMPTY is not sent at all, so these options change nothing for an upgrade that retypes nothing; a
+   * network without the flag refuses an upgrade carrying a non-empty list. Malformed or mismatched lists throw
+   * synchronously, before any node call.
    */
-  updateSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbSignOptions): Promise<string> {
+  updateSchemaSigned(signer: DdbSignerLike, schemaName: string, definition: string | ContractDefinition, opts?: DdbUpdateSchemaOptions): Promise<string> {
+    const { supersedes, deployed, ...signOpts } = opts ?? {};
+    let def: string | ContractDefinition = definition;
+    if (supersedes !== undefined || deployed !== undefined) def = withSupersedes(definition, { supersedes, deployed });
     if (typeof definition !== 'string') {
-      const { errors } = validateContractDefinition(definition);
+      const { errors } = validateContractDefinition(def as ContractDefinition);
       if (errors.length) throw new Error(`invalid contract definition:\n  - ${errors.join('\n  - ')}`);
     }
-    return this.signAndSubmit(signer, 'updateschema', schemaName, definition, opts).then((r) => r.requestId);
+    return this.signAndSubmit(signer, 'updateschema', schemaName, def, signOpts).then((r) => r.requestId);
   }
 
   /** Call a stored procedure, signed by the caller. `schemaName` is the derived db_name (Ddb.deriveDbName). */
