@@ -5,6 +5,8 @@ import {
   type ContractDefinition, type DdbSupersedesOptions, validateContractDefinition, withSupersedes, carriesSupersedes,
 } from './ddb-schema';
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
+import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndpointsJSON } from './ddb-resolve';
+import { buildDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
 // `(string & {})` arm keeps autocomplete on the known ops while still accepting any forward-compatible op.
@@ -2194,5 +2196,61 @@ export class Ddb {
    */
   shadowStatus(): Promise<{ mode: string; checks: string; mismatches: string }> {
     return this.call('ddb_shadowStatus');
+  }
+
+  // ---------------------------------------------------------------------------
+  // PLACE-02 (NEC-93): provider discovery, placement quotes, capability tokens
+  // ---------------------------------------------------------------------------
+
+  private resolver: DdbResolver | null = null;
+
+  /**
+   * The host group serving a contract's database (ddb_resolveDatabase), cached per sealed epoch: never served across
+   * a seal. `opts` turns on the record-proof check against a trusted header source and the two-node cross-check
+   * (owner ruling 35, Q1 (a)); an older node without the resolver yields `{ fallback: true }` (use this node).
+   */
+  resolve(contract: string, opts?: DdbResolverOptions): Promise<ResolveResult> {
+    if (opts) return new DdbResolver((m, p) => this.call(m, p), opts).resolve(contract);
+    if (!this.resolver) this.resolver = new DdbResolver((m, p) => this.call(m, p));
+    return this.resolver.resolve(contract);
+  }
+
+  /** Published endpoints of the given validators, default the current host group (ddb_hostEndpoints). */
+  hostEndpoints(validatorIds?: number[]): Promise<{ directory: string; block: number; blockTime: number; hosts: HostEndpointsJSON[] }> {
+    return this.call('ddb_hostEndpoints', validatorIds ? [validatorIds] : []);
+  }
+
+  /** A provider's schema-v2 claim bytes, served only when they hash to the sealed claimHash (ddb_providerClaim). */
+  providerClaim(validatorId: number): Promise<{ validatorId: number; claimHash: string; claim: string; block: number; txHash: string }> {
+    return this.call('ddb_providerClaim', [validatorId]);
+  }
+
+  /**
+   * The group the placement engine WOULD place a contract on in the current sealed epoch (ddb_quotePlacement): every
+   * provider live at the seal, R = all, with the PlacementManager.place calldata. Books nothing.
+   */
+  quotePlacement(req: { contract: string; owner: string; replicaBytes: string | number | bigint; tier?: 'shared' | 'dedicated' }): Promise<any> {
+    return this.call('ddb_quotePlacement', [{ ...req, replicaBytes: '0x' + BigInt(req.replicaBytes).toString(16) }]);
+  }
+
+  /**
+   * Mint a capability token (owner ruling 35 (3)): `signer` signs the token hash through the raw-hash path, stamped
+   * now, for the sealed epoch this node resolves the contract to. The host checks the role at every use.
+   */
+  async issueCapabilityToken(signer: DdbSignerLike, contract: string, role: string,
+    opts: { ttlSeconds?: number; chainId?: string | number | bigint; groupVersion?: number } = {}): Promise<DdbCapabilityToken> {
+    const chainId = opts.chainId ?? (await this.call('eth_chainId'));
+    let groupVersion = opts.groupVersion;
+    if (groupVersion === undefined) {
+      const r = await this.resolve(contract);
+      if (!r.resolved) throw new Error('this node has no resolver (an older node): capability tokens need PLACE-02 hosts');
+      groupVersion = r.resolved.epoch;
+    }
+    return buildDdbCapabilityToken(toDdbSigner(signer), { chainId, contract, role, groupVersion, ttlSeconds: opts.ttlSeconds });
+  }
+
+  /** ddb_select under a capability token for the token's contract (ddb_tokenSelect). */
+  tokenSelect(token: DdbCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+    return this.call('ddb_tokenSelect', [token, tableName, withReadToken(query as DdbQueryOptions)]);
   }
 }

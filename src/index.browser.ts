@@ -36,6 +36,20 @@ export {
   type GroupDurableReceipt, type GroupDurableSignature, type DdbCommittee, type DdbCommitteeMember,
   type GroupDurableVerifyOptions, type GroupDurableVerdict,
 } from './ddb-group-durable';
+// PLACE-02 (NEC-93): provider discovery client (per-epoch cache, record proofs, two-node cross-check) and
+// wallet-signed capability tokens.
+export {
+  DdbResolver, type DdbResolverOptions, type ResolveResult, type ResolvedDatabase, type HostEndpointsJSON, type HostMemberJSON,
+} from './ddb-resolve';
+export {
+  verifyRegistryProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH,
+  type RegistryProofJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
+} from './ddb-proof';
+export {
+  buildDdbCapabilityToken, canonicalDdbCapabilityBytes, canonicalDdbCapabilityHash, normalizeRoleName,
+  DDB_CAPABILITY_DOMAIN, DDB_TOKEN_LIFETIME_MIN, DDB_TOKEN_LIFETIME_MAX, DDB_TOKEN_LIFETIME_DEFAULT,
+  type DdbCapabilityToken, type DdbCapabilityFields, type BuildDdbCapabilityOptions,
+} from './ddb-capability';
 export { Wallet, Signer, type TxParams } from './wallet.browser';
 export {
   signTransactionMLDSA87, signRotatedTransactionMLDSA87, privateKeyToAddress, publicKeyToAddress, decodeRLPTransaction,
