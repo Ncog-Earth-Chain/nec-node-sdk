@@ -59,6 +59,9 @@ export {
   DDB_CAPABILITY_DOMAIN, DDB_TOKEN_LIFETIME_MIN, DDB_TOKEN_LIFETIME_MAX, DDB_TOKEN_LIFETIME_DEFAULT,
   type DdbCapabilityToken, type DdbCapabilityFields, type BuildDdbCapabilityOptions,
 } from './ddb-capability';
+export {
+  verifyHostGroupRecord, HOST_GROUP_RECORD_DOMAIN, HOST_GROUP_RECORD_HEAD_BYTES, type HostGroupRecordJSON,
+} from './ddb-host-group';
 export { Wallet, Signer, type TxParams } from './wallet';
 // Transaction signer (SigVersion-v2 ML-DSA-87; chainId is always bound — no wire-format toggles).
 export {

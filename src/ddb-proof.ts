@@ -20,8 +20,8 @@ import { keccak_256 } from '@noble/hashes/sha3';
  * (ethapi TestRegistryProofVector): its sealed proof verifies, its head proof does not.
  */
 
-/** keccak256 of the reviewed ProviderRegistry runtime (ddb/providerreg RuntimeCodeHash). */
-export const PROVIDER_REGISTRY_RUNTIME_CODE_HASH = '0x0f31223eff41a809b03dbb72578191f3f227c4b3b4d9c11a21c16125c9f7aeff';
+/** keccak256 of the reviewed ProviderRegistry runtime (ddb/providerreg RuntimeCodeHash; moved by ECO-06's advertiseRecord). */
+export const PROVIDER_REGISTRY_RUNTIME_CODE_HASH = '0xbe2656d97f1993ac2caa80ca6915335552cd3261f86813cca1e066a1a1d00e1e';
 
 /** Storage layout the node reads (providerreg Slot* / ProviderWord*). */
 export const REGISTRY_SLOT_ELIGIBILITY_FLOOR = 3;
