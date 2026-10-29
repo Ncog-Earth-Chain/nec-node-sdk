@@ -21,7 +21,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
  */
 
 /** keccak256 of the reviewed ProviderRegistry runtime (ddb/providerreg RuntimeCodeHash; moved by ECO-06's advertiseRecord). */
-export const PROVIDER_REGISTRY_RUNTIME_CODE_HASH = '0xbe2656d97f1993ac2caa80ca6915335552cd3261f86813cca1e066a1a1d00e1e';
+export const PROVIDER_REGISTRY_RUNTIME_CODE_HASH = '0xa4ad0ce660f87d21fc535e73edb3bf72045eea23522753f53cf275d30e3cd7b6';
 
 /** Storage layout the node reads (providerreg Slot* / ProviderWord*). */
 export const REGISTRY_SLOT_ELIGIBILITY_FLOOR = 3;
