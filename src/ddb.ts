@@ -7,6 +7,7 @@ import {
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndpointsJSON } from './ddb-resolve';
 import { buildDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
+import { verifyHostGroupRecord, type HostGroupRecordJSON } from './ddb-host-group';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
 // `(string & {})` arm keeps autocomplete on the known ops while still accepting any forward-compatible op.
@@ -2218,6 +2219,17 @@ export class Ddb {
   /** Published endpoints of the given validators, default the current host group (ddb_hostEndpoints). */
   hostEndpoints(validatorIds?: number[]): Promise<{ directory: string; block: number; blockTime: number; hosts: HostEndpointsJSON[] }> {
     return this.call('ddb_hostEndpoints', validatorIds ? [validatorIds] : []);
+  }
+
+  /**
+   * ECO-06 (NEC-113): a validator's host-group record for the current sealed epoch (ddb_resolveHostGroup) -- price
+   * list, bond, payout address, per-region endpoints, SLA -- served only when it is signed by the validator's bound
+   * key and bonded at the DECIDE-17 minimum. The answer is checked here: the bytes must hash to recordHash and the
+   * served head fields must be the bytes' own (verifyHostGroupRecord). Cache it against (epoch, root, rootSeq).
+   */
+  async resolveHostGroup(validatorId: number): Promise<HostGroupRecordJSON> {
+    const a: HostGroupRecordJSON = await this.call('ddb_resolveHostGroup', [validatorId]);
+    return verifyHostGroupRecord(validatorId, a);
   }
 
   /** A provider's schema-v2 claim bytes, served only when they hash to the sealed claimHash (ddb_providerClaim). */
