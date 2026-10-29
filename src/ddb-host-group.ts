@@ -9,7 +9,8 @@ import { keccak_256 } from '@noble/hashes/sha3';
  * the DECIDE-17 minimum for the capacity offered. The node also decodes the record into fields; this module checks
  * that the served bytes hash to the served recordHash and that the fixed-offset head (the bytes the registry itself
  * parsed: tag, validator, key, operator, capacity, bond contract, payout, endpoint directory) agrees with the served
- * fields, so a client never acts on a decoding the bytes do not support. The signature itself was checked by the
+ * head fields. It does NOT re-check the decoded fields beyond the head (prices, regions, SLA, engine fields, endpoint
+ * references): a client that acts on those decodes them from `record` itself. The signature itself was checked by the
  * registry contract through the ML-DSA-87 precompile; it is in the HostGroupRecorded event, not in the answer.
  *
  * Cache the answer against (epoch, root, rootSeq): the root moves on every accepted record and every removal.
