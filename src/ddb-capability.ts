@@ -146,3 +146,101 @@ export async function buildDdbCapabilityToken(signer: DdbSigner, o: BuildDdbCapa
     callerPubKey: hex(await signer.getPublicKey()), signature: hex(sig),
   };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// PLACE-02 wallet half (NEC-93): the bound read at request time, and the client-side token check
+// ---------------------------------------------------------------------------------------------------------------------
+
+type Send = (method: string, params: any[]) => Promise<any>;
+
+/** EndpointDirectory storage slot of tokenLifetime (contracts/EndpointDirectory.sol; the node reads it raw). */
+export const DDB_TOKEN_LIFETIME_SLOT = 2;
+/** The host's clock allowance into the future for issuedAt (ethapi ddbSignedReadMaxSkew). */
+export const DDB_TOKEN_MAX_SKEW = 15;
+
+/**
+ * The network's token-lifetime bound, read at request time: the EndpointDirectory `ddb_hostEndpoints` names, its
+ * tokenLifetime at the sealed `rootBlock` (what hosts enforce) and at the head, the LOWER of the two (a Timelock change
+ * since the seal must not make a token too long for the hosts). A value outside the contract's own bounds is not a
+ * bound; none readable, or no directory, is an error: hosts accept no token then either.
+ */
+export async function readDdbTokenLifetimeBound(send: Send, rootBlock?: number): Promise<{ directory: string; seconds: number }> {
+  const list = await send('ddb_hostEndpoints', []);
+  const directory = String(list?.directory ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(directory) || /^0x0{40}$/.test(directory)) {
+    throw new Error('the network has no EndpointDirectory configured, so no host accepts a capability token');
+  }
+  const at = async (block: string): Promise<number | undefined> => {
+    try {
+      const v = BigInt(await send('eth_getStorageAt', [directory, '0x' + DDB_TOKEN_LIFETIME_SLOT.toString(16), block]));
+      return v >= BigInt(DDB_TOKEN_LIFETIME_MIN) && v <= BigInt(DDB_TOKEN_LIFETIME_MAX) ? Number(v) : undefined;
+    } catch {
+      return undefined; // a pruned node may not hold rootBlock's state
+    }
+  };
+  const vals = [rootBlock ? await at('0x' + rootBlock.toString(16)) : undefined, await at('latest')]
+    .filter((v): v is number => v !== undefined);
+  if (vals.length === 0) {
+    throw new Error(`the EndpointDirectory ${directory} has no readable token lifetime within [${DDB_TOKEN_LIFETIME_MIN}, ${DDB_TOKEN_LIFETIME_MAX}] s`);
+  }
+  return { directory, seconds: Math.min(...vals) };
+}
+
+let _mldsa87: any = null;
+async function mldsa87(): Promise<any> {
+  if (_mldsa87) return _mldsa87;
+  // @ts-ignore - noble-post-quantum.js is a bundled JS file without TypeScript declarations
+  const noblePQ = (await import('./noble-post-quantum.js')) as any;
+  _mldsa87 = (noblePQ.default || noblePQ).ml_dsa87;
+  if (!_mldsa87) throw new Error('ml_dsa87 not available in bundled noble-post-quantum');
+  return _mldsa87;
+}
+
+const unhex = (h: string): Uint8Array => {
+  const s = String(h).replace(/^0x/i, '');
+  if (s.length % 2 || /[^0-9a-f]/i.test(s)) throw new Error('not hex');
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+  return out;
+};
+
+export interface VerifyDdbCapabilityOptions {
+  /** The chain the token must name (the host's step 1). */
+  chainId?: Uintish;
+  /** The lifetime bound in seconds (default the contract maximum, 3600). */
+  lifetimeBound?: number;
+  /** Seconds since the epoch (default now). */
+  now?: number;
+}
+
+/**
+ * The checks a client can make on a token, in the host's order and with its reasons (ethapi verifyCapabilityToken
+ * steps 1-4): the chain, the clock (issuedAt <= now + 15 s, now < expiry, expiry > issuedAt), the lifetime bound, the
+ * caller is keccak256(callerPubKey)[12:], and the ML-DSA-87 signature over the canonical hash as given. The group
+ * (step 5) and the role (step 6) are the host's alone: a token this accepts can still be refused by a host outside
+ * its group or after a revoke. A wallet runs it on its own token before answering, so a signer that signed anything
+ * but the token hash (an EIP-191 prefix) never reaches the dApp.
+ */
+export async function verifyDdbCapabilityToken(t: DdbCapabilityToken, o: VerifyDdbCapabilityOptions = {}): Promise<{ valid: boolean; reason?: string }> {
+  try {
+    if (o.chainId !== undefined && toBig(t.chainId) !== toBig(o.chainId)) {
+      return { valid: false, reason: `the token is for chain ${toBig(t.chainId)}, not ${toBig(o.chainId)}` };
+    }
+    const issued = Number(toBig(t.issuedAt)), expiry = Number(toBig(t.expiry));
+    const now = o.now ?? Math.floor(Date.now() / 1000);
+    if (expiry <= issued) return { valid: false, reason: 'the token expires at or before it is issued' };
+    if (issued > now + DDB_TOKEN_MAX_SKEW) return { valid: false, reason: 'the token is issued in the future' };
+    if (now >= expiry) return { valid: false, reason: 'the token expired' };
+    const bound = o.lifetimeBound ?? DDB_TOKEN_LIFETIME_MAX;
+    if (expiry - issued > bound) return { valid: false, reason: `the token lives ${expiry - issued} s, above the lifetime bound of ${bound} s` };
+    const pub = unhex(t.callerPubKey);
+    if (hex(keccak_256(pub).slice(12)) !== String(t.caller).toLowerCase()) {
+      return { valid: false, reason: "the token's public key does not match its caller address" };
+    }
+    const h = canonicalDdbCapabilityHash(t);
+    if (!(await mldsa87()).verify(pub, h, unhex(t.signature))) return { valid: false, reason: "the token's signature verification failed" };
+    return { valid: true };
+  } catch (e: any) {
+    return { valid: false, reason: `malformed token: ${e?.message ?? e}` };
+  }
+}
