@@ -6,7 +6,7 @@ import {
 } from './ddb-schema';
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndpointsJSON } from './ddb-resolve';
-import { buildDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
+import { buildDdbCapabilityToken, readDdbTokenLifetimeBound, verifyDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
 import { verifyHostGroupRecord, type HostGroupRecordJSON } from './ddb-host-group';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
@@ -2259,6 +2259,29 @@ export class Ddb {
       groupVersion = r.resolved.epoch;
     }
     return buildDdbCapabilityToken(toDdbSigner(signer), { chainId, contract, role, groupVersion, ttlSeconds: opts.ttlSeconds });
+  }
+
+  /**
+   * The wallet path (PLACE-02 wallet half, ddb_requestCapability): the sealed epoch resolved afresh, the network's
+   * lifetime bound read NOW (readDdbTokenLifetimeBound: the EndpointDirectory's tokenLifetime at the sealed root and
+   * at the head, the lower), the requested lifetime capped at it (default: the bound), stamped now, and the token
+   * checked with verifyDdbCapabilityToken before it is returned -- a signer that signed any other digest (an EIP-191
+   * prefix) is refused here rather than at every host. An older node without the resolver is refused.
+   */
+  async requestCapabilityToken(signer: DdbSignerLike, contract: string, role: string,
+    opts: { ttlSeconds?: number } = {}): Promise<{ token: DdbCapabilityToken; ttl: number }> {
+    if (opts.ttlSeconds !== undefined && (!Number.isInteger(opts.ttlSeconds) || opts.ttlSeconds < 1)) {
+      throw new Error('ttlSeconds must be a positive whole number of seconds');
+    }
+    const chainId = await this.call('eth_chainId');
+    const r = await this.resolve(contract);
+    if (!r.resolved) throw new Error('this node has no resolver (an older node): capability tokens need PLACE-02 hosts');
+    const bound = await readDdbTokenLifetimeBound((m, p) => this.call(m, p), r.resolved.rootBlock);
+    const ttl = Math.min(opts.ttlSeconds ?? bound.seconds, bound.seconds);
+    const token = await buildDdbCapabilityToken(toDdbSigner(signer), { chainId, contract, role, groupVersion: r.resolved.epoch, ttlSeconds: ttl });
+    const v = await verifyDdbCapabilityToken(token, { chainId, lifetimeBound: bound.seconds });
+    if (!v.valid) throw new Error(`refusing a token that does not pass the host's checks: ${v.reason}`);
+    return { token, ttl };
   }
 
   /** ddb_select under a capability token for the token's contract (ddb_tokenSelect). */

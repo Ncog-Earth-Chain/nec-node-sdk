@@ -47,6 +47,7 @@ export {
 } from './ddb-proof';
 export {
   buildDdbCapabilityToken, canonicalDdbCapabilityBytes, canonicalDdbCapabilityHash, normalizeRoleName,
+  readDdbTokenLifetimeBound, verifyDdbCapabilityToken, DDB_TOKEN_LIFETIME_SLOT, DDB_TOKEN_MAX_SKEW, type VerifyDdbCapabilityOptions,
   DDB_CAPABILITY_DOMAIN, DDB_TOKEN_LIFETIME_MIN, DDB_TOKEN_LIFETIME_MAX, DDB_TOKEN_LIFETIME_DEFAULT,
   type DdbCapabilityToken, type DdbCapabilityFields, type BuildDdbCapabilityOptions,
 } from './ddb-capability';
