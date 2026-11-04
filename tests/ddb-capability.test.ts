@@ -70,7 +70,7 @@ describe('PLACE-02 Ddb token methods', () => {
       calls.push([m, p]);
       if (m === 'eth_chainId') return '0x9af';
       if (m === 'eth_getBlockByNumber') return { epoch: '0x7' };
-      if (m === 'ddb_resolveDatabase') return { epoch: 7, hostGroup: { members: [] } };
+      if (m === 'ddb_resolveDatabase') return { contract: golden.contract, epoch: 7, hostGroup: { members: [] } };
       return [{ ok: true }];
     } };
     const ddb = new Ddb(provider as any);
