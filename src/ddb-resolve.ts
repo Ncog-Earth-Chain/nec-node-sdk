@@ -1,4 +1,5 @@
 import { verifyRegistryProof, verifyPlacementProof, type RegistryProofJSON, type ServedProvider, type PlacementRecordJSON } from './ddb-proof';
+import { parseDdbCurrentReadRoute, type DdbCurrentReadRoute } from './ddb-private-read';
 
 /**
  * PLACE-02 phase B/C client side (NEC-93; docs/design/place-02-provider-discovery.md §5, §6 "SDK and wallet
@@ -50,6 +51,8 @@ export interface ResolvedDatabase {
   hostGroup: { members: HostMemberJSON[]; size: number; minSigners: number };
   proof?: RegistryProofJSON;
   placementRecord?: PlacementRecordJSON;
+  /** Present only for the explicit currentRoute request; independent of the sealed answer/proof above. */
+  currentRoute?: DdbCurrentReadRoute;
 }
 
 export interface ResolveResult {
@@ -89,6 +92,17 @@ export class DdbResolver {
   private readonly cache = new Map<string, ResolveResult>();
 
   constructor(private readonly send: RpcSend, private readonly opts: DdbResolverOptions = {}) {}
+
+  /**
+   * Fresh current finalized route claim, separate from the sealed epoch cache. This validates shape and
+   * member hash only, NOT authenticity or readiness. No old-server fallback and no sealed-proof downgrade.
+   * A private caller must still authenticate the assignment and endpoint using its own trusted policy.
+   */
+  async resolveCurrent(contract: string): Promise<DdbCurrentReadRoute> {
+    if (this.opts.withProof) throw new Error('unsupported-current-proof: sealed proofs do not authenticate current assignments');
+    const answer = await this.send('ddb_resolveDatabase', [contract, { currentRoute: true }]);
+    return parseDdbCurrentReadRoute(contract, answer?.currentRoute);
+  }
 
   /** The chain's current epoch (the epoch of the latest block). */
   async currentEpoch(): Promise<number> {
