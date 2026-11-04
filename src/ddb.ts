@@ -9,6 +9,9 @@ import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndp
 import { sendDdbPrivateRead, validateDdbPrivateReadOptions, type DdbPrivateReadOptions, type DdbCurrentReadRoute } from './ddb-private-read';
 import { buildDdbCapabilityToken, readDdbTokenLifetimeBound, verifyDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
 import { verifyHostGroupRecord, type HostGroupRecordJSON } from './ddb-host-group';
+import { aliasAddress, aliasChainId, aliasReference, aliasRegistry, assertAliasMetadata,
+  type DdbContractAlias, type DdbContractAliasList } from './ddb-aliases';
+export type { DdbContractAlias, DdbContractAliasList } from './ddb-aliases';
 
 // The comparison operators Ddb.select understands (mirrors the chain's supported predicate set). The
 // `(string & {})` arm keeps autocomplete on the known ops while still accepting any forward-compatible op.
@@ -1920,8 +1923,45 @@ export class Ddb {
   }
 
   /**
+   * Visible registry names in a wallet's namespace. This does not enumerate hidden/private contracts
+   * or prove ownership. Equal names remain separate address-pinned records; names never select a
+   * contract implicitly. The node-wide withheld count is not a count belonging to this wallet.
+   *
+   * @example
+   * const visible = await ddb.listContractAliases(walletAddress);
+   * // Let the user choose by full address when names repeat.
+   * const selected = visible.aliases.find(a => a.contractAddress === chosenAddress);
+   * if (selected) await ddb.select(await ddb.resolveDbName(selected), 'balances');
+   */
+  async listContractAliases(ownerAddress: string): Promise<DdbContractAliasList> {
+    const owner = aliasAddress(ownerAddress);
+    const chainId = aliasChainId(await this.call('eth_chainId'));
+    const response = await this.getSchema('');
+    await this.assertAliasNetwork(chainId);
+    const visible = aliasRegistry(response, chainId);
+    return Object.freeze({ ...visible,
+      aliases: Object.freeze(visible.aliases.filter(a => a.ownerAddress === owner)) });
+  }
+
+  private async assertAliasNetwork(chainId: string): Promise<void> {
+    if (aliasChainId(await this.call('eth_chainId')) !== chainId) {
+      throw new Error('ddb alias: selected chain does not match the current network');
+    }
+  }
+
+  private async revalidateAlias(reference: DdbContractAlias): Promise<DdbContractAlias> {
+    const selected = aliasReference(reference); // snapshot before the first await
+    await this.assertAliasNetwork(selected.chainId);
+    const response = await this.getSchema(selected.registryAddress);
+    assertAliasMetadata(selected, response);
+    await this.assertAliasNetwork(selected.chainId);
+    return selected;
+  }
+
+  /**
    * Resolve the AUTHORITATIVE schema name for a contract by asking the chain, falling back to
    * `Ddb.deriveDbName` only when the node does not report one.
+   * A selected alias reference instead requires its exact metadata/chain binding and never falls back.
    *
    * PREFER THIS OVER `deriveDbName` for every schema-scoped call. Derivation is correct only for a
    * node built after the "derive the contract schema from the full address" change; a node running
@@ -1937,7 +1977,10 @@ export class Ddb {
    * unreachable, an older RPC that omits the field) the derived name is the best available guess and
    * is what the caller would have used anyway.
    */
-  async resolveDbName(contractAddress: string): Promise<string> {
+  async resolveDbName(contractAddress: string | DdbContractAlias): Promise<string> {
+    // A chosen alias must still name exactly the same contract, owner, name and network. This
+    // strict path has no derivation fallback; the historical string-address path below is unchanged.
+    if (typeof contractAddress !== 'string') return (await this.revalidateAlias(contractAddress)).dbName;
     try {
       const info = await this.getSchema(contractAddress);
       const rows = Array.isArray(info?.contracts) ? info.contracts : [];
@@ -2230,15 +2273,30 @@ export class Ddb {
    * The host group serving a contract's database (ddb_resolveDatabase), cached per sealed epoch: never served across
    * a seal. `opts` turns on the record-proof check against a trusted header source and the two-node cross-check
    * (owner ruling 35, Q1 (a)); an older node without the resolver yields `{ fallback: true }` (use this node).
+   * Alias references are revalidated first and use a fresh resolver scoped to the selected chain.
    */
-  resolve(contract: string, opts?: DdbResolverOptions): Promise<ResolveResult> {
+  async resolve(contract: string | DdbContractAlias, opts?: DdbResolverOptions): Promise<ResolveResult> {
+    if (typeof contract !== 'string') {
+      const selected = await this.revalidateAlias(contract);
+      // The legacy resolver cache is epoch/contract-scoped, not chain-scoped. A selected alias uses
+      // a fresh resolver so switching networks cannot reuse another chain's equal-epoch answer.
+      const result = await new DdbResolver((m, p) => this.call(m, p), opts).resolve(selected.contractAddress);
+      await this.assertAliasNetwork(selected.chainId);
+      return result;
+    }
     if (opts) return new DdbResolver((m, p) => this.call(m, p), opts).resolve(contract);
     if (!this.resolver) this.resolver = new DdbResolver((m, p) => this.call(m, p));
     return this.resolver.resolve(contract);
   }
 
   /** Fresh, untrusted current-route claim, never the sealed epoch cache; withProof explicitly refuses. */
-  resolveCurrent(contract: string, opts?: DdbResolverOptions): Promise<DdbCurrentReadRoute> {
+  async resolveCurrent(contract: string | DdbContractAlias, opts?: DdbResolverOptions): Promise<DdbCurrentReadRoute> {
+    if (typeof contract !== 'string') {
+      const selected = await this.revalidateAlias(contract);
+      const result = await new DdbResolver((m, p) => this.call(m, p), opts).resolveCurrent(selected.contractAddress);
+      await this.assertAliasNetwork(selected.chainId);
+      return result;
+    }
     return new DdbResolver((m, p) => this.call(m, p), opts).resolveCurrent(contract);
   }
 
