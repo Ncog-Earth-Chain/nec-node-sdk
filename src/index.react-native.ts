@@ -48,8 +48,8 @@ export {
   DdbResolver, type DdbResolverOptions, type ResolveResult, type ResolvedDatabase, type HostEndpointsJSON, type HostMemberJSON,
 } from './ddb-resolve';
 export {
-  verifyRegistryProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH,
-  type RegistryProofJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
+  verifyRegistryProof, verifyPlacementProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_RUNTIME_CODE_HASH,
+  type RegistryProofJSON, type PlacementRecordJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
 } from './ddb-proof';
 export {
   buildDdbCapabilityToken, canonicalDdbCapabilityBytes, canonicalDdbCapabilityHash, normalizeRoleName,
