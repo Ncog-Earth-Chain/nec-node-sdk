@@ -529,7 +529,7 @@ export function canonicalDdbRequestId(
 // Operation preimage v2 (SEC-03): gossip/ddb/op_preimage.go canonicalOperationBytesV2
 // ---------------------------------------------------------------------------
 
-/** Every field of a v2 operation preimage. `type` is the numeric inter.DdbOperationType (0..9). */
+/** Every field of a v2 operation preimage. `type` is 0..10, or the explicit PLACE-03 commitment type 15. */
 export interface DdbCanonicalOpV2 {
   type: number;
   chainId: number | bigint | string;
@@ -640,9 +640,10 @@ export function ddbOpPreimageDbIdentity(typeByte: number, schemaName: string, da
  * Pinned against the node's canonicalOpVectorsV2 in tests/ddb-preimage-v2.test.ts.
  */
 export function canonicalDdbOperationBytesV2(op: DdbCanonicalOpV2): Uint8Array {
-  // The node has ten types (0..9). A value outside that range is refused rather than masked to a byte:
+  // The original types are 0..9; PLACE-03 adds migration10 and commitment15. Other reserved
+  // types remain refused rather than masked to a byte:
   // `undefined & 0xff` is 0, which is how necjs 3.0.0 signed a delete as a CreateSchema.
-  if (!Number.isInteger(op.type) || op.type < 0 || op.type > 9) {
+  if (!Number.isInteger(op.type) || op.type < 0 || (op.type > 10 && op.type !== 15)) {
     throw new Error(`unknown DDB operation type ${JSON.stringify(op.type)}`);
   }
   const fromBytes = ddbHexToBytes(op.from);
@@ -1035,7 +1036,7 @@ function toDdbSigner(s: DdbSignerLike): DdbSigner {
 
 /** The `ddb_submitSignedOp` envelope, exactly as the node parses it. */
 export interface DdbSignedOpEnvelope {
-  type: string;
+  type: string | number;
   schemaName: string;
   data: string;
   from: string;
@@ -1048,6 +1049,8 @@ export interface DdbSignedOpEnvelope {
   keyVersion?: string;
   callerPubKey: string;
   callerSig: string;
+  /** PLACE-03 commitment form only: public keyed row tags; the selected host recomputes these from the private sidecar. */
+  stateDelta?: { removed?: string[]; added?: string[] };
 }
 
 /**

@@ -94,8 +94,8 @@ describe('the v2 preimage, pinned to the node vectors for all ten operation type
       .not.toBe(hex(canonicalDdbOperationHashV2(fixOp(7))));
   });
 
-  it('refuses an operation type outside the node range instead of truncating it', () => {
-    expect(() => canonicalDdbOperationBytesV2(fixOp(10))).toThrow(/operation type/);
+  it('refuses an unsupported operation type instead of truncating it', () => {
+    expect(() => canonicalDdbOperationBytesV2(fixOp(11))).toThrow(/operation type/);
     expect(() => canonicalDdbOperationBytesV2(fixOp(undefined as any))).toThrow(/operation type/);
   });
 });

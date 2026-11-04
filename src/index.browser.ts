@@ -46,6 +46,15 @@ export {
   type RegistryProofJSON, type PlacementRecordJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
 } from './ddb-proof';
 export {
+  buildDdbCommitment, deriveDdbDigestKey, ddbPayloadCommitment, encodeDdbCommitmentEnvelope, decodeDdbCommitmentEnvelope,
+  DDB_COMMITMENT_PAYLOAD_MAX_BYTES, type DdbCommitmentEnvelope, type DdbTagDelta, type DdbPayloadSidecar,
+  type BuildDdbCommitmentInput, type BuiltDdbCommitment, type DdbPrivateIntent,
+} from './ddb-commitment';
+export {
+  buildDdbDigestRotationPreview, buildDdbDigestRotation,
+  type BuildDdbDigestRotationPreviewInput, type BuildDdbDigestRotationInput, type DdbDigestRotationExpected,
+} from './ddb-digest-rotation';
+export {
   buildDdbCapabilityToken, canonicalDdbCapabilityBytes, canonicalDdbCapabilityHash, normalizeRoleName,
   readDdbTokenLifetimeBound, verifyDdbCapabilityToken, DDB_TOKEN_LIFETIME_SLOT, DDB_TOKEN_MAX_SKEW, type VerifyDdbCapabilityOptions,
   DDB_CAPABILITY_DOMAIN, DDB_TOKEN_LIFETIME_MIN, DDB_TOKEN_LIFETIME_MAX, DDB_TOKEN_LIFETIME_DEFAULT,
