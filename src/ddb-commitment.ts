@@ -145,6 +145,84 @@ function intentJSON(value: unknown): string {
   throw new Error('private intent must contain only JSON values');
 }
 
+// Go struct decoding accepts case-insensitive field aliases and may merge
+// duplicate object members. Validate the exact JSON spelling before using the
+// JavaScript interpretation, while retaining the original bytes for signing.
+const operationFields = new Set([
+  'type', 'schema_name', 'data', 'gas_limit', 'gas_price', 'from', 'nonce', 'timestamp', 'expiry', 'key_version',
+  'name', 'creator', 'version', 'tables', 'contract_name', 'author', 'description', 'schema', 'procedures',
+  'roles', 'role_assignments', 'procedure_access', 'metadata', 'contractAddress', 'caller_pubkey', 'caller_sig',
+  'write_set', 'state_delta', 'attested_delta', 'originator', 'txn',
+]);
+const rowFields = new Set(['Table', 'PK', 'Old', 'New']);
+const primaryKeyFields = new Set(['String', 'Valid']);
+const deltaFields = new Set(['removed', 'added']);
+
+function exactFields(value: unknown, fields: ReadonlySet<string>, name: string): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid private ' + name + ' object');
+  for (const field of Object.keys(value)) {
+    if (!fields.has(field)) throw new Error('invalid private ' + name + ' field ' + field);
+  }
+}
+
+function parsePrivatePayload(payload: Uint8Array) {
+  // Preserve a BOM so JSON.parse rejects it, rather than silently removing bytes
+  // that Go's JSON decoder would reject. Invalid UTF-8 must never be replaced.
+  const raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(payload);
+  const parsed = JSON.parse(raw); // Native parser first validates the JSON grammar.
+  let offset = 0;
+  const space = () => { while (/[ \t\r\n]/.test(raw[offset] ?? '')) offset++; };
+  const string = (): string => {
+    const start = offset++;
+    while (raw[offset] !== '"') offset += raw[offset] === '\\' ? 2 : 1;
+    const value: string = JSON.parse(raw.slice(start, ++offset));
+    // Go replaces unpaired UTF-16 escapes, whereas JavaScript retains them.
+    // Reject that ambiguity in both member names and string values.
+    for (let i = 0; i < value.length; i++) {
+      const unit = value.charCodeAt(i);
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        const next = value.charCodeAt(++i);
+        if (!(next >= 0xdc00 && next <= 0xdfff)) throw new Error('invalid private JSON Unicode string');
+      } else if (unit >= 0xdc00 && unit <= 0xdfff) throw new Error('invalid private JSON Unicode string');
+    }
+    return value;
+  };
+  const visit = (depth: number): void => {
+    if (depth > 128) throw new Error('private JSON depth exceeds bound');
+    space();
+    if (raw[offset] === '{') {
+      offset++; space();
+      const seen = new Set<string>();
+      if (raw[offset] !== '}') {
+        do {
+          space();
+          const key = string();
+          if (seen.has(key)) throw new Error('duplicate private JSON member');
+          seen.add(key); space(); offset++; // Colon; native parsing checked it.
+          visit(depth + 1); space();
+          if (raw[offset] !== ',') break;
+          offset++;
+        } while (true);
+      }
+      offset++;
+    } else if (raw[offset] === '[') {
+      offset++; space();
+      if (raw[offset] !== ']') {
+        do {
+          visit(depth + 1); space();
+          if (raw[offset] !== ',') break;
+          offset++;
+        } while (true);
+      }
+      offset++;
+    } else if (raw[offset] === '"') string();
+    else while (offset < raw.length && !/[ \t\r\n,\]}]/.test(raw[offset])) offset++;
+  };
+  visit(0);
+  exactFields(parsed, operationFields, 'payload');
+  return parsed;
+}
+
 export interface BuildDdbCommitmentInput {
   /** Exact host-preview JSON, including canonical row deltas, carried only in the private sidecar. */
   payload: Uint8Array;
@@ -166,7 +244,7 @@ export function buildDdbCommitment(input: BuildDdbCommitmentInput, options: DdbS
   const contract = addr(input.contract), from = addr(input.from), database = 'c_' + contract.slice(2);
   const key = checkedKey(input.digestKey), payload = new Uint8Array(input.payload), salt = input.salt ? new Uint8Array(input.salt) : randomBytes(32);
   const commitment = ddbPayloadCommitment(salt, payload);
-  const inner = JSON.parse(new TextDecoder().decode(payload));
+  const inner = parsePrivatePayload(payload);
   if (!inner || ![4, 5, 6, 7, 'insertdata', 'updatedata', 'deletedata', 'callprocedure'].includes(inner.type)) throw new Error('private payload must be a data operation');
   if (inner.schema_name !== database || addr(inner.contractAddress) !== contract || addr(inner.from) !== from) throw new Error('private payload database, contract or caller differs');
   if (!input.intent || privateType(inner.type) !== privateType(input.intent.type) || intentJSON(inner.data) !== intentJSON(input.intent.data)) {
@@ -176,10 +254,18 @@ export function buildDdbCommitment(input: BuildDdbCommitmentInput, options: DdbS
     const value = inner[name];
     if (value != null && value !== '' && (!Array.isArray(value) || value.length !== 0)) throw new Error('private payload contains definition field ' + name);
   }
+  if (inner.txn != null) throw new Error('private payload cannot contain a DB-01 transaction');
+  if (inner.write_set != null && !Array.isArray(inner.write_set)) throw new Error('invalid private write_set array');
+  if (inner.state_delta != null) exactFields(inner.state_delta, deltaFields, 'state_delta');
   if ((!Array.isArray(inner.write_set) || inner.write_set.length === 0) && inner.state_delta == null) throw new Error('private preview carries no write-set');
   const removed: Uint8Array[] = [], added: Uint8Array[] = [];
   for (const row of inner.write_set ?? []) {
+    exactFields(row, rowFields, 'point delta');
     if (!row || typeof row.Table !== 'string' || !row.Table || !Array.isArray(row.PK) || !row.PK.length || (row.Old == null && row.New == null)) throw new Error('invalid private point delta');
+    for (const pk of row.PK) {
+      exactFields(pk, primaryKeyFields, 'primary key');
+      if (typeof pk.String !== 'string' || typeof pk.Valid !== 'boolean') throw new Error('invalid private primary key value');
+    }
     if (row.Old != null) removed.push(rowElement(unbase64(row.Old), row.Table));
     if (row.New != null) added.push(rowElement(unbase64(row.New), row.Table));
   }

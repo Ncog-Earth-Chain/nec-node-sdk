@@ -52,6 +52,72 @@ test('intent comparison accepts reordered object keys without changing exact com
   expect(p.prepared.requestId).toBe(v.cases[0].requestId);
 });
 
+test.each(['DATA', 'TYPE', 'ROLES', 'unknown', 'row-alias', 'delta-alias', 'pk-alias', 'delta-array', 'pk-type'])('private preview rejects ambiguous schema %s before signing', (change) => {
+  const i = input(), inner = JSON.parse(Buffer.from(i.payload).toString());
+  switch (change) {
+    case 'DATA': inner.DATA = { ...inner.data, set: { name: 'changed' } }; break;
+    case 'TYPE': inner.TYPE = 7; break;
+    case 'ROLES': inner.ROLES = ['admin']; break;
+    case 'unknown': inner.future_operation = {}; break;
+    case 'row-alias': inner.write_set[0].new = inner.write_set[0].Old; break;
+    case 'delta-alias': inner.state_delta = { Added: [inner.write_set[0].New] }; break;
+    case 'pk-alias': inner.write_set[0].PK[0].valid = false; break;
+    case 'delta-array': inner.state_delta = []; break;
+    case 'pk-type': inner.write_set[0].PK[0].Valid = 'true'; break;
+  }
+  i.payload = new TextEncoder().encode(JSON.stringify(inner));
+  expect(() => buildDdbCommitment(i, opts)).toThrow(/private|field|schema/);
+});
+
+test.each(['operation', 'escaped-key', 'sql-data', 'row', 'general-delta'])('private preview rejects duplicate %s JSON members before signing', (change) => {
+  const i = input();
+  let raw = Buffer.from(i.payload).toString();
+  switch (change) {
+    case 'operation': raw = raw.replace('"data":', '"data":{},"data":'); break;
+    case 'escaped-key': raw = raw.replace('"data":', '"d\\u0061ta":{},"data":'); break;
+    case 'sql-data': raw = raw.replace('"name":"bob"', '"name":"first","name":"bob"'); break;
+    case 'row': raw = raw.replace('"Table":', '"Table":"other","Table":'); break;
+    case 'general-delta': raw = raw.slice(0, -1) + ',"state_delta":{"added":[],"added":[]}}'; break;
+  }
+  i.payload = new TextEncoder().encode(raw);
+  expect(() => buildDdbCommitment(i, opts)).toThrow(/duplicate/);
+});
+
+test.each(['invalid-utf8', 'byte-order-mark', 'unpaired-surrogate', 'depth'])('private preview rejects %s without changing committed bytes', (change) => {
+  const i = input(), inner = JSON.parse(Buffer.from(i.payload).toString());
+  if (change === 'invalid-utf8') {
+    const payload = Buffer.from(i.payload);
+    payload[payload.indexOf('bob')] = 255;
+    i.payload = payload;
+    i.intent.data.set.name = '\ufffdob';
+  } else if (change === 'byte-order-mark') {
+    i.payload = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(i.payload)]);
+  } else if (change === 'unpaired-surrogate') {
+    inner.data.set.name = '\ud800'; i.intent.data.set.name = '\ud800';
+    i.payload = new TextEncoder().encode(JSON.stringify(inner));
+  } else {
+    let deep: unknown = 'end';
+    for (let n = 0; n < 130; n++) deep = [deep];
+    inner.data = deep;
+    i.payload = new TextEncoder().encode(JSON.stringify(inner));
+    expect(() => buildDdbCommitment({ ...i, intent: { type: 5, data: deep } }, opts)).toThrow(/depth/);
+    return;
+  }
+  expect(() => buildDdbCommitment(i, opts)).toThrow();
+});
+
+test('private preview preserves normal Go JSON escaping, Unicode and arbitrary SQL object keys', () => {
+  const i = input(), inner = JSON.parse(Buffer.from(i.payload).toString());
+  const data = { procedure: 'update_profile', args: [{ DATA: '雪😀<&>', Name: 'value', 'a"b': '\\' }] };
+  inner.type = 7; inner.data = data;
+  inner.state_delta = { removed: [inner.write_set[0].Old], added: [inner.write_set[0].New] };
+  delete inner.write_set;
+  i.payload = new TextEncoder().encode(JSON.stringify(inner).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026'));
+  const result = buildDdbCommitment({ ...i, intent: { type: 7, data } }, opts);
+  expect(result.sidecar.payload).toBe('0x' + Buffer.from(i.payload).toString('hex'));
+  expect(result.stateDelta).toEqual(v.stateDelta);
+});
+
 test.each(['zero-key', 'short-key', 'salt', 'oversize', 'caller', 'contract', 'database', 'public-op', 'metadata', 'bad-row', 'missing-delta'])('%s refuses before signing', (kind) => {
   const i = input();
   const inner = JSON.parse(Buffer.from(i.payload).toString());

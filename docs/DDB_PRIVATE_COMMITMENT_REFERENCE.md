@@ -16,6 +16,8 @@ This is the offline SDK portion of the gated PLACE-03 implementation. It does no
 
 The caller checks and signs the exact commitment bytes. A host independently reexecutes the private mutation and recomputes its row tags before accepting the payload. The builder does not prove that a malicious host's returned row images reflect the database; that check belongs to the placed group's endorsement and finality protocol.
 
+Preview JSON uses the node's exact field names. The builder rejects unknown or differently cased operation, row-delta, primary-key and state-delta fields, duplicate members at every object level, invalid UTF-8, byte-order marks, unpaired Unicode surrogates and nesting beyond 128 levels. These checks prevent JavaScript and Go from interpreting the same signed bytes differently. SQL data object keys remain case-sensitive user data; ordinary Unicode and Go's escaped HTML characters are accepted without rewriting the sidecar.
+
 `deriveDdbDigestKey(masterKey, contract)` implements the domain-separated HKDF derivation. It does not select a version or perform rotation. Encryption-key rotation must not silently change the active digest key. Use the key fingerprint and version admitted by the reviewed migration; retain older keys needed for historical recovery. The deterministic tags reveal equality of row versions, as accepted for release one.
 
 ## Host RPC sequence
