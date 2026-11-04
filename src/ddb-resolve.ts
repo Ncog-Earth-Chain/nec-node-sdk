@@ -1,4 +1,4 @@
-import { verifyRegistryProof, type RegistryProofJSON, type ServedProvider } from './ddb-proof';
+import { verifyRegistryProof, verifyPlacementProof, type RegistryProofJSON, type ServedProvider, type PlacementRecordJSON } from './ddb-proof';
 
 /**
  * PLACE-02 phase B/C client side (NEC-93; docs/design/place-02-provider-discovery.md §5, §6 "SDK and wallet
@@ -49,13 +49,14 @@ export interface ResolvedDatabase {
   labels: string[];
   hostGroup: { members: HostMemberJSON[]; size: number; minSigners: number };
   proof?: RegistryProofJSON;
+  placementRecord?: PlacementRecordJSON;
 }
 
 export interface ResolveResult {
   /** True when the node has no resolver (-32601): use the configured node for everything. */
   fallback: boolean;
   resolved?: ResolvedDatabase;
-  /** Whether the record proofs were verified (withProof). */
+  /** Whether provider and attached booking storage proofs were verified; activation/key bindings remain node-asserted. */
   proven?: boolean;
 }
 
@@ -111,6 +112,7 @@ export class DdbResolver {
       throw e;
     }
     let proven = false;
+    if (answer.contract.toLowerCase() !== key) throw new Error('the resolver answered for another contract');
     if (this.opts.withProof) {
       const hs = this.opts.headerSource ?? this.send;
       const header = await hs('eth_getBlockByNumber', ['0x' + answer.rootBlock.toString(16), false]);
@@ -120,13 +122,26 @@ export class DdbResolver {
       const served = answer.hostGroup.members.filter((m) => m.provider).map((m) => m.provider as ServedProvider);
       const v = verifyRegistryProof(header.stateRoot, answer.registry, answer.proof, served);
       if (!v.valid) throw new Error(`the resolver's record proof does not verify: ${v.reason}`);
+      if (answer.placementRecord) {
+        if (answer.placementRecord.proof?.block !== answer.rootBlock) throw new Error('placement proof is missing or names another sealed block');
+        const p = verifyPlacementProof(header.stateRoot, answer.contract, answer.placementRecord);
+        if (!p.valid) throw new Error(`the resolver's placement proof does not verify: ${p.reason}`);
+      }
       proven = true;
     }
     if (this.opts.crossCheck) {
       const other: ResolvedDatabase = await this.opts.crossCheck('ddb_resolveDatabase', [contract]);
       const shape = (r: ResolvedDatabase) => JSON.stringify({
-        epoch: r.epoch, stateRoot: r.stateRoot.toLowerCase(), sealed: r.sealedConsenting,
-        members: r.hostGroup.members.map((m) => [m.address.toLowerCase(), m.validatorId]), minSigners: r.hostGroup.minSigners,
+        contract: r.contract.toLowerCase(), database: r.database, placement: r.placement, databaseScoped: r.databaseScoped,
+        epoch: r.epoch, rootBlock: r.rootBlock, sealTime: r.sealTime, stateRoot: r.stateRoot.toLowerCase(), sealed: r.sealedConsenting,
+        registry: r.registry.toLowerCase(), eligibilityActive: r.eligibilityActive, outcome: r.outcome, floorBps: r.floorBps, labels: r.labels,
+        members: r.hostGroup.members.map((m) => [m.address.toLowerCase(), m.validatorId, m.weight == null ? null : BigInt(m.weight).toString(), m.consenting, m.liveAtSeal]),
+        size: r.hostGroup.size, minSigners: r.hostGroup.minSigners,
+        booking: r.placementRecord ? {
+          manager: r.placementRecord.manager.toLowerCase(), version: BigInt(r.placementRecord.version).toString(),
+          groupHash: r.placementRecord.groupHash.toLowerCase(), replicaBytes: BigInt(r.placementRecord.replicaBytes).toString(),
+          members: r.placementRecord.members, enforced: r.placementRecord.enforced, unavailable: r.placementRecord.unavailableMembers ?? [],
+        } : null,
       });
       if (shape(other) !== shape(answer)) {
         throw new Error('the two nodes disagree on the sealed host group; refusing to route (Q1 (a) cross-check)');
@@ -151,7 +166,10 @@ export class DdbResolver {
    */
   static pickMember(resolved: ResolvedDatabase, endpoints: HostEndpointsJSON[], preferValidatorId?: number):
     { validatorId: number; url: string; tlsKeyHash: string } | null {
-    const members = new Set(resolved.hostGroup.members.map((m) => m.validatorId));
+    const unavailable = new Set(resolved.placementRecord?.unavailableMembers ?? []);
+    const members = new Set(resolved.hostGroup.members.filter((m) =>
+      !unavailable.has(m.validatorId) && !/^0x0{40}$/i.test(m.address) && (m.weight == null || BigInt(m.weight) > BigInt(0)),
+    ).map((m) => m.validatorId));
     const live = endpoints
       .filter((h) => members.has(h.validatorId) && h.live && h.endpoints.length > 0)
       .sort((a, b) => a.validatorId - b.validatorId);

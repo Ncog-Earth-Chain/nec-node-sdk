@@ -15,7 +15,7 @@ function answer(epoch: number, withProof = false): ResolvedDatabase {
   const s = vec.sealed;
   const members = s.providers.slice(0, 2).map((p: any, i: number) => ({
     address: '0x00000000000000000000000000000000000000d' + (i + 1), validatorId: p.validatorId, weight: '0x1',
-    consenting: true, liveAtSeal: true, provider: { validatorId: p.validatorId, record: p.record },
+    consenting: true, liveAtSeal: true, provider: { validatorId: p.validatorId, record: { ...p.record } },
   }));
   return {
     contract: CONTRACT, database: 'c_' + CONTRACT.slice(2), placement: 'full-replication', databaseScoped: false,
@@ -99,5 +99,58 @@ describe('PLACE-02 resolver client', () => {
     expect(DdbResolver.pickMember(resolved, [ep(9, true), ep(1, false), ep(2, true)], 1)?.validatorId).toBe(2);
     expect(DdbResolver.pickMember(resolved, [ep(9, true), ep(1, true), ep(2, true)], 2)?.validatorId).toBe(2);
     expect(DdbResolver.pickMember(resolved, [ep(9, true), ep(1, false)])).toBeNull();
+  });
+});
+
+describe('sealed per-database placement metadata', () => {
+  function placed(epoch: number): ResolvedDatabase {
+    const a = answer(epoch);
+    a.placement = 'host-group';
+    a.databaseScoped = true;
+    a.placementRecord = {
+      manager: '0x' + '23'.repeat(20), version: '0x7', groupHash: '0x' + 'ab'.repeat(32), replicaBytes: '0x1000',
+      members: a.hostGroup.members.map((m) => m.validatorId), enforced: true,
+    };
+    return a;
+  }
+
+  test.each(['manager', 'version', 'groupHash', 'replicaBytes', 'members', 'enforced', 'unavailableMembers', 'absent', 'placement', 'databaseScoped', 'rootBlock', 'contract', 'weight'])('%s disagreement refuses even with proofs off', async (field) => {
+    const first = mockNode({ epoch: 7, calls: [], answerFor: placed });
+    const second = mockNode({ epoch: 7, calls: [], answerFor: (epoch) => {
+      const a = placed(epoch);
+      const p = a.placementRecord!;
+      switch (field) {
+        case 'manager': p.manager = '0x' + '24'.repeat(20); break;
+        case 'version': p.version = '0x8'; break;
+        case 'groupHash': p.groupHash = '0x' + 'cd'.repeat(32); break;
+        case 'replicaBytes': p.replicaBytes = '0x2000'; break;
+        case 'members': p.members.reverse(); break;
+        case 'enforced': p.enforced = false; break;
+        case 'unavailableMembers': p.unavailableMembers = [p.members[0]]; break;
+        case 'absent': delete a.placementRecord; break;
+        case 'placement': a.placement = 'full-replication'; break;
+        case 'databaseScoped': a.databaseScoped = false; break;
+        case 'rootBlock': a.rootBlock++; break;
+        case 'contract': a.contract = '0x' + 'ff'.repeat(20); break;
+        case 'weight': a.hostGroup.members[0].weight = '0x0'; break;
+      }
+      return a;
+    } });
+    await expect(new DdbResolver(first, { crossCheck: second }).resolve(CONTRACT)).rejects.toThrow(/disagree/);
+  });
+
+  test('matching booking is accepted; unavailable or zero-key members cannot be picked', async () => {
+    const send = mockNode({ epoch: 7, calls: [], answerFor: placed });
+    const a = (await new DdbResolver(send, { crossCheck: send }).resolve(CONTRACT)).resolved!;
+    a.placementRecord!.unavailableMembers = [a.hostGroup.members[0].validatorId];
+    a.hostGroup.members[1].address = '0x' + '00'.repeat(20);
+    const endpoints = a.hostGroup.members.map((m) => ({ validatorId: m.validatorId, live: true, status: 'live', expiry: 0, auth: '0x',
+      endpoints: [{ scheme: 'https', url: `https://n${m.validatorId}.example`, tlsKeyHash: '0x' }] }));
+    expect(DdbResolver.pickMember(a, endpoints)).toBeNull();
+  });
+
+  test('proof mode never marks an unproven booking as proven', async () => {
+    const send = mockNode({ epoch: 7, calls: [], answerFor: (epoch) => ({ ...answer(epoch, true), placementRecord: placed(epoch).placementRecord }) });
+    await expect(new DdbResolver(send, { withProof: true }).resolve(CONTRACT)).rejects.toThrow(/placement.*proof/i);
   });
 });
