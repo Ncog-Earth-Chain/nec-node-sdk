@@ -772,3 +772,8 @@ Once `ddb-recomputable-anchor` is active, every validator recomputes each contra
 - **Send one contract's predicate writes through one node** (one `Ddb` instance / one RPC endpoint) where you can.
 - Point writes (row-lock procedures) are unaffected. Batching several operations into one transaction or batch also avoids the race.
 - Treat `state_chain_break` as retryable, as `runTransaction` already does (`isRetryableDdbTxnSkip`).
+
+## Private commitment API
+
+The gated PLACE-03 offline builder and its transport boundaries are documented in
+[Private commitment builder](DDB_PRIVATE_COMMITMENT_REFERENCE.md).

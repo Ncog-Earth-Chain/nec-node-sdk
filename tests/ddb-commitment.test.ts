@@ -5,6 +5,7 @@ import { buildDdbCommitment, deriveDdbDigestKey, encodeDdbCommitmentEnvelope, de
 const v = JSON.parse(fs.readFileSync(path.join(__dirname, 'vectors/place03_commitment_vector.json'), 'utf8'));
 const bytes = (s: string) => new Uint8Array(Buffer.from(s.slice(2), 'hex'));
 const input = () => ({ payload: bytes(v.sidecar.payload), salt: bytes(v.sidecar.salt), digestKey: bytes(v.digestKey),
+  intent: { type: 5, data: { table: 'users', set: { name: 'bob' }, where: { id: 1 } } },
   contract: v.contract, from: v.from, callerPubKey: new Uint8Array([1]), placementVersion: BigInt(3), digestKeyVersion: BigInt(1) });
 const opts = { chainId: v.chainId, timestamp: v.timestamp, expiry: v.expiry, gasLimit: v.gasLimit, nonce: v.nonce, preimageVersion: 2 as const };
 
@@ -31,6 +32,24 @@ test('fresh salts change commitments and signatures without changing determinist
   expect(a.stateDelta).toEqual(b.stateDelta);
   const c = buildDdbCommitment({ ...input(), digestKey: new Uint8Array(32).fill(9) }, opts);
   expect(c.stateDelta).not.toEqual(a.stateDelta);
+});
+
+test.each(['mutation', 'operation', 'rounded-number'])('untrusted preview cannot change the locally intended %s', (change) => {
+  const i = input();
+  const inner = JSON.parse(Buffer.from(i.payload).toString());
+  if (change === 'mutation') inner.data.set.name = 'mallory';
+  if (change === 'operation') inner.type = 7;
+  if (change === 'rounded-number') { inner.data.where.id = Number.MAX_SAFE_INTEGER + 1; i.intent.data.where.id = Number.MAX_SAFE_INTEGER + 1; }
+  i.payload = new TextEncoder().encode(JSON.stringify(inner));
+  expect(() => buildDdbCommitment(i, opts)).toThrow(/intent|number/);
+});
+
+test('intent comparison accepts reordered object keys without changing exact committed bytes', () => {
+  const i = input();
+  i.intent.data = { where: { id: 1 }, set: { name: 'bob' }, table: 'users' };
+  const p = buildDdbCommitment(i, opts);
+  expect(p.sidecar).toEqual(v.sidecar);
+  expect(p.prepared.requestId).toBe(v.cases[0].requestId);
 });
 
 test.each(['zero-key', 'short-key', 'salt', 'oversize', 'caller', 'contract', 'database', 'public-op', 'metadata', 'bad-row', 'missing-delta'])('%s refuses before signing', (kind) => {

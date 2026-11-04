@@ -115,9 +115,41 @@ const compare = (a: Uint8Array, b: Uint8Array) => {
 
 export interface DdbTagDelta { removed?: string[]; added?: string[] }
 export interface DdbPayloadSidecar { salt: string; payload: string }
+/** Keep this from the locally requested mutation; never copy it from the host's preview response. */
+export interface DdbPrivateIntent { type: number | 'insertdata' | 'updatedata' | 'deletedata' | 'callprocedure'; data: unknown }
+
+const privateType = (type: DdbPrivateIntent['type']): number => {
+  if (typeof type === 'number' && [4, 5, 6, 7].includes(type)) return type;
+  switch (type) {
+    case 'insertdata': return 4;
+    case 'updatedata': return 5;
+    case 'deletedata': return 6;
+    case 'callprocedure': return 7;
+    default: throw new Error('private intent must name a data operation');
+  }
+};
+
+// Compare JSON meaning without allowing the host to exploit floating-point
+// rounding. Exact decimal/bigint SQL arguments must be supplied as strings.
+function intentJSON(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) throw new Error('private intent JSON number must be a safe integer; use an exact string');
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return '[' + value.map(intentJSON).join(',') + ']';
+  if (typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    const record = value as Record<string, unknown>;
+    return '{' + Object.keys(record).sort().map((key) => JSON.stringify(key) + ':' + intentJSON(record[key])).join(',') + '}';
+  }
+  throw new Error('private intent must contain only JSON values');
+}
+
 export interface BuildDdbCommitmentInput {
   /** Exact host-preview JSON, including canonical row deltas, carried only in the private sidecar. */
   payload: Uint8Array;
+  /** Original local mutation, used to refuse an altered host preview before signing the commitment. */
+  intent: DdbPrivateIntent;
   digestKey: Uint8Array;
   contract: string;
   from: string;
@@ -137,6 +169,9 @@ export function buildDdbCommitment(input: BuildDdbCommitmentInput, options: DdbS
   const inner = JSON.parse(new TextDecoder().decode(payload));
   if (!inner || ![4, 5, 6, 7, 'insertdata', 'updatedata', 'deletedata', 'callprocedure'].includes(inner.type)) throw new Error('private payload must be a data operation');
   if (inner.schema_name !== database || addr(inner.contractAddress) !== contract || addr(inner.from) !== from) throw new Error('private payload database, contract or caller differs');
+  if (!input.intent || privateType(inner.type) !== privateType(input.intent.type) || intentJSON(inner.data) !== intentJSON(input.intent.data)) {
+    throw new Error('private preview differs from the locally requested intent');
+  }
   for (const name of ['tables', 'schema', 'procedures', 'roles', 'role_assignments', 'procedure_access', 'metadata', 'name', 'contract_name', 'version', 'description']) {
     const value = inner[name];
     if (value != null && value !== '' && (!Array.isArray(value) || value.length !== 0)) throw new Error('private payload contains definition field ' + name);
