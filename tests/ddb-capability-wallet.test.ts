@@ -85,7 +85,7 @@ describe('Ddb.requestCapabilityToken (the wallet path)', () => {
   const provider = (resolveErr?: any) => ({ send: async (m: string) => {
     if (m === 'eth_chainId') return '0x9af';
     if (m === 'eth_getBlockByNumber') return { epoch: '0x7' };
-    if (m === 'ddb_resolveDatabase') { if (resolveErr) throw resolveErr; return { epoch: 7, rootBlock: 100, hostGroup: { members: [] } }; }
+    if (m === 'ddb_resolveDatabase') { if (resolveErr) throw resolveErr; return { contract: '0x00000000000000000000000000000000000000c7', epoch: 7, rootBlock: 100, hostGroup: { members: [] } }; }
     if (m === 'ddb_hostEndpoints') return { directory: '0x00000000000000000000000000000000000000d1', hosts: [] };
     if (m === 'eth_getStorageAt') return '0x1c2';
     throw new Error(`unexpected ${m}`);
