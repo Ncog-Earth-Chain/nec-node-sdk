@@ -6,6 +6,7 @@ import {
 } from './ddb-schema';
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndpointsJSON } from './ddb-resolve';
+import { sendDdbPrivateRead, validateDdbPrivateReadOptions, type DdbPrivateReadOptions, type DdbCurrentReadRoute } from './ddb-private-read';
 import { buildDdbCapabilityToken, readDdbTokenLifetimeBound, verifyDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
 import { verifyHostGroupRecord, type HostGroupRecordJSON } from './ddb-host-group';
 
@@ -233,6 +234,8 @@ export const DDB_OP_PREIMAGE_V2_FEATURE = 'ddb-op-preimage-v2';
 export interface DdbOptions {
   /** The preimage every signed write uses unless the call says otherwise. Defaults to 'auto'. See DdbSignOptions. */
   opPreimageVersion?: DdbOpPreimageMode;
+  /** Default explicit private routing for signed reads; also refuses legacy CAP v1 operations. No default policy. */
+  privateRouting?: DdbPrivateReadOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -1360,7 +1363,7 @@ export interface DdbSignedReadEnvelope {
   callerSig: string;
 }
 
-/** Options for a signed read. Everything here except `chainId` is part of the signed preimage. */
+/** Options for a signed read. Routing is local policy and is not part of the signed preimage. */
 export interface DdbSignedReadOptions {
   /**
    * The network the signature is bound to. Defaults to asking the node (eth_chainId) in
@@ -1376,6 +1379,8 @@ export interface DdbSignedReadOptions {
   timestamp?: number;
   /** Defaults to 8 random bytes. The node serves each signing hash once, so never reuse one. */
   nonce?: number | bigint;
+  /** Use exact current-assignment home through the caller's verified confidential channel. No private fallback. */
+  privateRouting?: DdbPrivateReadOptions;
 }
 
 /** A signed read prepared for signing: what to sign, and the envelope it becomes. */
@@ -1433,7 +1438,7 @@ export interface DdbSignedReadProcedureEnvelope {
   callerSig: string;
 }
 
-/** Options for a signed read-procedure call; everything except `chainId` is in the signed preimage. */
+/** Options for a signed read-procedure call; privateRouting is local, unsigned policy. */
 export type DdbSignedReadProcedureOptions = Omit<DdbSignedReadOptions, 'joinTables'>;
 
 /** A signed read-procedure call prepared for signing: what to sign, and the envelope it becomes. */
@@ -2007,6 +2012,8 @@ export class Ddb {
     query: DdbQueryOptions | Record<string, unknown> = {},
     readOpts: DdbSignedReadOptions = {},
   ): Promise<DdbRow[] | DdbExactRow[]> {
+    const privateRouting = readOpts.privateRouting ?? this.options.privateRouting;
+    if (privateRouting) validateDdbPrivateReadOptions(privateRouting);
     const s = toDdbSigner(signer);
     const chainId = readOpts.chainId ?? (await this.call('eth_chainId'));
     const prepared = buildDdbSignedRead(
@@ -2014,7 +2021,10 @@ export class Ddb {
     );
     const sig = await s.signDdbHash(prepared.hash);
     const envelope: DdbSignedReadEnvelope = { ...prepared.envelope, callerSig: '0x' + ddbBytesToHex(sig) };
-    const res = await this.call('ddb_signedSelect', [envelope, withReadToken(query as DdbQueryOptions)]);
+    const params = [envelope, withReadToken(query as DdbQueryOptions)];
+    const res = privateRouting
+      ? await sendDdbPrivateRead(new DdbResolver((m, p) => this.call(m, p)), privateRouting, schemaName, prepared.hash, 'ddb_signedSelect', params)
+      : await this.call('ddb_signedSelect', params);
     return (query as DdbQueryOptions)?.exactNumbers ? ddbExactRows('ddb_signedSelect', res).rows : res;
   }
 
@@ -2061,6 +2071,8 @@ export class Ddb {
     consistency?: DdbReadConsistency,
     format?: DdbReadFormat,
   ): Promise<DdbRow[] | DdbExactRow[]> {
+    const privateRouting = opts.privateRouting ?? this.options.privateRouting;
+    if (privateRouting) validateDdbPrivateReadOptions(privateRouting);
     const s = toDdbSigner(signer);
     const chainId = opts.chainId ?? (await this.call('eth_chainId'));
     const prepared = buildDdbSignedReadProcedure(
@@ -2071,7 +2083,9 @@ export class Ddb {
     const params: unknown[] = [envelope];
     if (consistency || format?.exactNumbers) params.push(consistency ? withReadToken(consistency) : null);
     if (format?.exactNumbers) params.push({ exactNumbers: true }); // DB-02: unsigned, like the token
-    const res = await this.call('ddb_signedCallReadProcedure', params);
+    const res = privateRouting
+      ? await sendDdbPrivateRead(new DdbResolver((m, p) => this.call(m, p)), privateRouting, schemaName, prepared.hash, 'ddb_signedCallReadProcedure', params)
+      : await this.call('ddb_signedCallReadProcedure', params);
     return format?.exactNumbers ? ddbExactRows('ddb_signedCallReadProcedure', res).rows : res;
   }
 
@@ -2219,6 +2233,11 @@ export class Ddb {
     return this.resolver.resolve(contract);
   }
 
+  /** Fresh, untrusted current-route claim, never the sealed epoch cache; withProof explicitly refuses. */
+  resolveCurrent(contract: string, opts?: DdbResolverOptions): Promise<DdbCurrentReadRoute> {
+    return new DdbResolver((m, p) => this.call(m, p), opts).resolveCurrent(contract);
+  }
+
   /** Published endpoints of the given validators, default the current host group (ddb_hostEndpoints). */
   hostEndpoints(validatorIds?: number[]): Promise<{ directory: string; block: number; blockTime: number; hosts: HostEndpointsJSON[] }> {
     return this.call('ddb_hostEndpoints', validatorIds ? [validatorIds] : []);
@@ -2254,6 +2273,7 @@ export class Ddb {
    */
   async issueCapabilityToken(signer: DdbSignerLike, contract: string, role: string,
     opts: { ttlSeconds?: number; chainId?: string | number | bigint; groupVersion?: number } = {}): Promise<DdbCapabilityToken> {
+    this.refusePrivateCapability();
     const chainId = opts.chainId ?? (await this.call('eth_chainId'));
     let groupVersion = opts.groupVersion;
     if (groupVersion === undefined) {
@@ -2273,6 +2293,7 @@ export class Ddb {
    */
   async requestCapabilityToken(signer: DdbSignerLike, contract: string, role: string,
     opts: { ttlSeconds?: number } = {}): Promise<{ token: DdbCapabilityToken; ttl: number }> {
+    this.refusePrivateCapability();
     if (opts.ttlSeconds !== undefined && (!Number.isInteger(opts.ttlSeconds) || opts.ttlSeconds < 1)) {
       throw new Error('ttlSeconds must be a positive whole number of seconds');
     }
@@ -2288,14 +2309,20 @@ export class Ddb {
   }
 
   /** ddb_select under a capability token for the token's contract (ddb_tokenSelect). */
-  tokenSelect(token: DdbCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+  async tokenSelect(token: DdbCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+    this.refusePrivateCapability();
     return this.call('ddb_tokenSelect', [token, tableName, withReadToken(query as DdbQueryOptions)]);
   }
 
   /** A read-only procedure of the token's contract under a capability token (ddb_tokenCallReadProcedure). */
-  tokenCallReadProcedure(token: DdbCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
+  async tokenCallReadProcedure(token: DdbCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
+    this.refusePrivateCapability();
     const params: unknown[] = [token, procedure, args];
     if (consistency) params.push(withReadToken(consistency));
     return this.call('ddb_tokenCallReadProcedure', params);
+  }
+
+  private refusePrivateCapability(): void {
+    if (this.options.privateRouting) throw new Error('private routing does not support CAP v1 epoch audiences');
   }
 }
