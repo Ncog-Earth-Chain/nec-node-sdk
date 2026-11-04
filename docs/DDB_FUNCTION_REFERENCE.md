@@ -777,3 +777,5 @@ Once `ddb-recomputable-anchor` is active, every validator recomputes each contra
 
 The gated PLACE-03 offline builder and its transport boundaries are documented in
 [Private commitment builder](DDB_PRIVATE_COMMITMENT_REFERENCE.md).
+The offline operation10 preparation/final-signing helpers are documented in
+[Digest-key rotation](DDB_DIGEST_ROTATION_REFERENCE.md).

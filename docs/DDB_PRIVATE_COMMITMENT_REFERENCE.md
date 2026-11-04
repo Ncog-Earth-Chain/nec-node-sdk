@@ -32,3 +32,16 @@ Use an explicitly selected, authenticated placement-host transport. This SDK mod
 The node refuses private submission through its legacy global-committee forwarder. Client endpoint authentication, confidentiality, placement freshness and release activation remain separate requirements; do not rely on a routing fallback for private bytes.
 
 Cross-language vectors cover HKDF, keyed row tags, exact envelope bytes, operation hash and request ID, including versions above 2^53 and uint64 maximum. Tests also reject altered intent, unsafe numbers, malformed rows, missing write sets, zero keys and oversized payloads.
+
+## Ordered private batches
+
+Use the authenticated selected placement host for the complete sequence. These calls are direct RPCs; the offline builder does not implement transport, endpoint authentication or post-quantum client-to-host encryption.
+
+1. Retain every original local mutation intent and its order. Send the corresponding signed data-operation array to `ddb_previewPrivateBatch`. It previews the sequence in one rollback-only snapshot, so later members can observe earlier previewed changes.
+2. Build and sign each commitment with `buildDdbCommitment`, using that member's exact returned payload and its **original local intent**, in the same order. Verify the database, placement and digest version are the intended common bindings. Each final signed operation needs its own nonce.
+3. Call `ddb_putPayloadBatch` with the signed commitment array and matching sidecar array. Success acknowledges retention on that host. A disk failure can leave a retained prefix; retries are idempotent, and partial retention is not a committed batch.
+4. Call `ddb_submitSignedPrivateBatch` with the same signed commitment array after retention succeeds. Poll `ddb_getCommitStatus` for its returned transaction hash and check local materialization separately.
+
+The homogeneous batch is one ordered endorsement submission. Members apply independently; it is **not a DB-01 atomic transaction** or a guarantee of application-level all-or-nothing execution. Do not reorder, replace, or mix individually previewed operations into the sequence. Cross-member ACID semantics remain outside this phase.
+
+For explicit digest-key migration preparation and signing, see [Digest-key rotation](DDB_DIGEST_ROTATION_REFERENCE.md).
