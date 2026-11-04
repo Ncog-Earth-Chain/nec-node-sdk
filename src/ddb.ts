@@ -234,7 +234,7 @@ export const DDB_OP_PREIMAGE_V2_FEATURE = 'ddb-op-preimage-v2';
 export interface DdbOptions {
   /** The preimage every signed write uses unless the call says otherwise. Defaults to 'auto'. See DdbSignOptions. */
   opPreimageVersion?: DdbOpPreimageMode;
-  /** Default explicit private routing for signed reads; also refuses legacy CAP v1 operations. No default policy. */
+  /** Default private routing for signed reads; refuses anonymous data and CAP v1 operations. No default policy. */
   privateRouting?: DdbPrivateReadOptions;
 }
 
@@ -1959,6 +1959,7 @@ export class Ddb {
   select(schemaName: string, tableName: string, opts: DdbQueryOptions & { exactNumbers: true }): Promise<DdbExactRow[]>;
   select(schemaName: string, tableName: string, opts?: DdbQueryOptions): Promise<DdbRow[] | DdbExactRow[]>;
   async select(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbRow[] | DdbExactRow[]> {
+    this.refusePrivateAnonymousRead();
     const res = await this.call('ddb_select', [schemaName, tableName, withReadToken(opts)]);
     return opts?.exactNumbers ? ddbExactRows('ddb_select', res).rows : res;
   }
@@ -1970,6 +1971,7 @@ export class Ddb {
   selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions & { exactNumbers: true }): Promise<DdbExactVersionedRows>;
   selectVersioned(schemaName: string, tableName: string, opts?: DdbQueryOptions): Promise<DdbVersionedRows>;
   async selectVersioned(schemaName: string, tableName: string, opts: DdbQueryOptions = {}): Promise<DdbVersionedRows | DdbExactVersionedRows> {
+    this.refusePrivateAnonymousRead();
     const res = await this.call('ddb_selectVersioned', [schemaName, tableName, withReadToken(opts)]);
     if (!opts?.exactNumbers) return res;
     const { rows, columns } = ddbExactRows('ddb_selectVersioned', res && res.columns ? res : [res]);
@@ -1986,6 +1988,7 @@ export class Ddb {
   async query(
     schemaName: string, tableName: string, limit = 100, consistency?: DdbReadConsistency, format?: DdbReadFormat,
   ): Promise<DdbRow[] | DdbExactRow[]> {
+    this.refusePrivateAnonymousRead();
     // The token is a fourth parameter only when given, and the read format (DB-02) a fifth only when it asks
     // for exact numbers, so an old call sends exactly what it always did.
     const params: unknown[] = [schemaName, tableName, limit];
@@ -2039,6 +2042,7 @@ export class Ddb {
   async callReadProcedure(
     schemaName: string, procedure: string, args: string[] = [], consistency?: DdbReadConsistency, format?: DdbReadFormat,
   ): Promise<DdbRow[] | DdbExactRow[]> {
+    this.refusePrivateAnonymousRead();
     // The token is a fourth parameter only when given, and the read format (DB-02) a fifth only when it asks
     // for exact numbers, so an old call sends exactly what it always did.
     const params: unknown[] = [schemaName, procedure, args];
@@ -2324,5 +2328,9 @@ export class Ddb {
 
   private refusePrivateCapability(): void {
     if (this.options.privateRouting) throw new Error('private routing does not support CAP v1 epoch audiences');
+  }
+
+  private refusePrivateAnonymousRead(): void {
+    if (this.options.privateRouting) throw new Error('private routing requires a signed read and authenticated transport');
   }
 }

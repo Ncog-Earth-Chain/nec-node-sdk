@@ -77,6 +77,9 @@ describe('PLACE-02F current route and direct private signed reads', () => {
     expect(rows).toEqual([{ n: BigInt('9007199254740993') }]);
     expect(f.connect.mock.calls[0][0].member.validatorId).toBe(home);
     expect(f.connect.mock.calls[0][0].endpoints).toEqual(endpoints([home])[0].endpoints);
+    expect(Object.isFrozen(f.connect.mock.calls[0][0])).toBe(true);
+    expect(Object.isFrozen(f.connect.mock.calls[0][0].route)).toBe(true);
+    expect(Object.isFrozen(f.connect.mock.calls[0][0].endpoints[0])).toBe(true);
     expect(f.verifyAssignment).toHaveBeenCalledTimes(1);
     expect(f.direct).toHaveBeenCalledWith('ddb_signedSelect', [
       { ...prepared.envelope, callerSig: '0x040506' },
@@ -216,6 +219,21 @@ describe('PLACE-02F current route and direct private signed reads', () => {
     const f = fixture();
     expect(await f.ddb.signedSelect(signer, DB, 'items', {}, baseOpts)).toEqual([{ ingress: true }]);
     expect(f.ingress.mock.calls.map(([m]) => m)).toEqual(['ddb_signedSelect']);
+    expect(f.direct).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['select', (ddb: Ddb) => ddb.select(DB, 'items', { filters: [{ column: 'secret', op: '=', value: 'hidden' }] })],
+    ['selectVersioned', (ddb: Ddb) => ddb.selectVersioned(DB, 'items')],
+    ['query', (ddb: Ddb) => ddb.query(DB, 'items')],
+    ['callReadProcedure', (ddb: Ddb) => ddb.callReadProcedure(DB, 'p', ['secret arg'])],
+  ] as const)('private client refuses anonymous %s while public clients retain dispatch', async (_name, call) => {
+    const f = fixture();
+    const privateClient = new Ddb({ send: f.ingress } as any, { privateRouting: { policy: f.policy } });
+    await expect(call(privateClient)).rejects.toThrow(/private.*signed/);
+    expect(f.ingress).not.toHaveBeenCalled();
+    await call(f.ddb);
+    expect(f.ingress).toHaveBeenCalledTimes(1);
     expect(f.direct).not.toHaveBeenCalled();
   });
 });
