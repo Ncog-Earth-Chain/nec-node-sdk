@@ -1049,6 +1049,8 @@ export interface DdbSignedOpEnvelope {
   keyVersion?: string;
   callerPubKey: string;
   callerSig: string;
+  /** PLACE-03 commitment form only: public keyed row tags; the selected host recomputes these from the private sidecar. */
+  stateDelta?: { removed?: string[]; added?: string[] };
 }
 
 /**

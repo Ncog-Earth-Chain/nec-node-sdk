@@ -172,5 +172,5 @@ export function buildDdbCommitment(input: BuildDdbCommitmentInput, options: DdbS
   const op: DdbCanonicalOpV2 = { type: 15, chainId: options.chainId!, schemaName: database, data, from,
     timestamp: BigInt(e.timestamp), gasLimit: BigInt(e.gasLimit), nonce: BigInt(e.nonce), expiry: BigInt(e.expiry!), keyVersion: BigInt(e.keyVersion!) };
   return { prepared: { hash: canonicalDdbOperationHashV2(op), requestId: hex(canonicalDdbRequestIdV2(op, from)),
-    envelope: { ...e, type: 15, data: hex(data) } }, sidecar: { salt: hex(salt), payload: hex(payload) }, stateDelta };
+    envelope: { ...e, type: 15, data: hex(data), stateDelta } }, sidecar: { salt: hex(salt), payload: hex(payload) }, stateDelta };
 }

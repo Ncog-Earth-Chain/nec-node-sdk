@@ -14,6 +14,7 @@ test('HKDF, private row tags and caller-signed operation match the Go vectors ex
     const p = buildDdbCommitment({ ...input(), placementVersion: BigInt(c.placementVersion), digestKeyVersion: BigInt(c.digestKeyVersion) }, opts);
     expect(p.sidecar).toEqual(v.sidecar);
     expect(p.stateDelta).toEqual(v.stateDelta);
+    expect(p.prepared.envelope.stateDelta).toEqual(v.stateDelta);
     expect(Buffer.from(p.prepared.hash).toString('hex')).toBe(c.hash.slice(2));
     expect(p.prepared.requestId).toBe(c.requestId);
     expect(Buffer.from(p.prepared.envelope.data.slice(2), 'hex').toString()).toBe(c.envelope);
