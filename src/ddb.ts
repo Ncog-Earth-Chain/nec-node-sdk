@@ -2281,6 +2281,9 @@ export class Ddb {
       // The legacy resolver cache is epoch/contract-scoped, not chain-scoped. A selected alias uses
       // a fresh resolver so switching networks cannot reuse another chain's equal-epoch answer.
       const result = await new DdbResolver((m, p) => this.call(m, p), opts).resolve(selected.contractAddress);
+      if (!result.fallback && result.resolved?.database !== selected.dbName) {
+        throw new Error('ddb alias: placement answer does not match the selected contract schema');
+      }
       await this.assertAliasNetwork(selected.chainId);
       return result;
     }
