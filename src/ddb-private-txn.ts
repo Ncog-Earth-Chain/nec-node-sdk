@@ -8,7 +8,7 @@ import {
 import { ddbPayloadCommitment, encodeDdbCommitmentEnvelope, DDB_COMMITMENT_PAYLOAD_MAX_BYTES, type DdbPayloadSidecar, type DdbTagDelta } from './ddb-commitment';
 import { PLACEMENT_MANAGER_RUNTIME_CODE_HASH } from './ddb-proof';
 
-// Preparation only: no node RPC currently accepts these private DB-01 members.
+// Canonical grammar shared by private DB-01 preparation and authenticated evidence.
 // This closed grammar does not replace the existing single-operation payload.
 // Effects/results are assertions; encoding them does not prove SQL execution.
 const utf8 = new TextEncoder();
@@ -865,6 +865,37 @@ function validateMember(m: PrivateTxnMemberV1, maxMembers: number): void {
     if (row.length !== m.result.columns.length) fail('result row width differs from columns');
     for (const cell of row) if (cell.null && cell.value.length) fail('SQL NULL result carries bytes');
   }
+}
+
+/** Existing member-v1 BASE fragment, used unchanged by authenticated evidence RPCs. */
+export function encodePrivateTxnBaseV1(base: PrivateTxnBaseV1): Uint8Array {
+  const bytes = encoded(emitPrivateTxnBaseV1, base);
+  // Reuse the existing member's BASE/context validation without effects or results.
+  validateMember({ kind: 'private-txn-member', version: BigInt(1), base, index: BigInt(0), count: BigInt(1),
+    intent: { type: BigInt(7), data: new Uint8Array(), timestamp: BigInt(0), gas_limit: BigInt(0), nonce: BigInt(0), expiry: BigInt(0), key_version: BigInt(0) },
+    effect: { added: [], removed: [] }, result: { affected: BigInt(0), columns: [], rows: [] } }, 1);
+  return bytes;
+}
+
+export function decodePrivateTxnBaseV1(bytes: Uint8Array): PrivateTxnBaseV1 {
+  checkedBytes(bytes);
+  const base = readPrivateTxnBaseV1(JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)));
+  if (compare(bytes, encodePrivateTxnBaseV1(base)) !== 0) return fail('not the canonical BASE encoding');
+  return base;
+}
+
+/** Existing canonical procedure-intent fragment; no new transaction grammar or domain. */
+export function encodePrivateTxnIntentV1(intent: PrivateTxnIntentV1): Uint8Array {
+  const bytes = encoded(emitPrivateTxnIntentV1, intent);
+  if (intent.type !== BigInt(7)) return fail('evidence intent is not a procedure');
+  return bytes;
+}
+
+export function decodePrivateTxnIntentV1(bytes: Uint8Array): PrivateTxnIntentV1 {
+  checkedBytes(bytes);
+  const intent = readPrivateTxnIntentV1(JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)));
+  if (compare(bytes, encodePrivateTxnIntentV1(intent)) !== 0) return fail('not the canonical intent encoding');
+  return intent;
 }
 
 /** Exact private V1 bytes; maxMembers comes from the captured rules, not a process default. */

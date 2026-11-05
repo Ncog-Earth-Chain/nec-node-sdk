@@ -80,7 +80,18 @@ export { readDdbPrivateTransactionOutcome, collectDdbPrivateTransactionOutcome }
 export type { DdbPrivateTxnOutcomeResolver, DdbPrivateTxnOutcomeReadInput, DdbPrivateTxnFinalityCandidate,
   DdbPrivateTxnLocalDurable, DdbPrivateTxnLocalOutcome, DdbPrivateTxnExpectation, DdbPrivateTxnCollectionInput,
   DdbPrivateTxnHostDisposition, DdbPrivateTxnCollection } from './ddb-private-txn-outcome';
-export * from './ddb-private-txn-online';
+export { prepareDdbPrivateTransaction, storeDdbPrivateTransactionPayloads, submitDdbPrivateTransaction } from './ddb-private-txn-online';
+export type { DdbPrivateTransactionCall, DdbPrivateTransactionRoot, DdbPrivatePreparedSnapshotRequest, DdbPrivateTransactionPrepareInput,
+  DdbPrivateTransactionRetryRecord, DdbPrivateTransactionSendInput, DdbPrivateTransactionCustodyResult, DdbPrivateTransactionSubmission } from './ddb-private-txn-online';
+export { encodeDdbPrivateRetryState, decodeDdbPrivateRetryState, DDB_PRIVATE_RETRY_MAX_BYTES, DDB_PRIVATE_RETRY_WORST_CASE_BYTES } from './ddb-private-retry';
+export type { DdbPrivateRetryState, DdbPrivateRetryPolicy, DdbPrivateRetryStore } from './ddb-private-retry';
+export type { DdbPrivateAuthority, DdbPrivateEvidenceSource, DdbPrivateAssignmentEvidence } from './ddb-private-evidence';
+export { createDdbTrustedNodePrivatePolicy, connectDdbNodePrivateEvidence } from './ddb-private-trust-node';
+export type { DdbTrustedNodePrivateOptions } from './ddb-private-trust-node';
+export { createDdbNodePrivateRetryStore } from './ddb-private-retry-node';
+export type { DdbNodePrivateRetryStoreOptions } from './ddb-private-retry-node';
+export { createDdbPrivateReferenceClient } from './ddb-private-client-node';
+export type { DdbPrivateReferenceClientOptions, DdbPrivateReferencePrepareInput } from './ddb-private-client-node';
 export {
   buildDdbCommitment, deriveDdbDigestKey, ddbPayloadCommitment, encodeDdbCommitmentEnvelope, decodeDdbCommitmentEnvelope,
   DDB_COMMITMENT_PAYLOAD_MAX_BYTES, type DdbCommitmentEnvelope, type DdbTagDelta, type DdbPayloadSidecar,

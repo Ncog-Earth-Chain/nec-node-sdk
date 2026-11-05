@@ -20,6 +20,7 @@ export interface DdbPrivateTransactionCall {
 }
 export interface DdbPrivateTransactionRoot { prior: string; post: string }
 export interface DdbPrivatePreparedSnapshotRequest {
+  maxMembers: number;
   connectedRoute: DdbCurrentReadRoute;
   recipient: DdbCurrentReadMember;
   localIntents: readonly PrivateTxnIntentV1[];
@@ -218,7 +219,7 @@ export async function prepareDdbPrivateTransaction(input: DdbPrivateTransactionP
           hex(encodePrivateTxnMemberV1({ ...m, intent: intents[i], base: decoded[0].base }, maxMembers)) !== hex(payloads[i])) return fail('preview BASE or retained intent differs');
     });
     const previewRoots = roots(replies.map(p => ({ prior: p.prior, post: p.post })), decoded.length, decoded[0].base.initial_anchor);
-    const accepted = await accept({ connectedRoute: channel.route, recipient: channel.member,
+    const accepted = await accept({ maxMembers, connectedRoute: channel.route, recipient: channel.member,
       localIntents: intents.map(i => ({ ...i, data: i.data.slice() })), previewMembers: payloads.map(p => decodePrivateTxnMemberV1(p, maxMembers)), roots: previewRoots.map(r => ({ ...r })) });
     if (!accepted) return fail('independent snapshot acceptance unavailable');
     const acceptedBase = decodePrivateTxnMemberV1(encodePrivateTxnMemberV1({ ...decoded[0], base: accepted.expectedBase }, maxMembers), maxMembers).base;
@@ -244,7 +245,11 @@ function stable(value: any): string {
   return JSON.stringify(value, (_k, v) => v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
 }
-function ownedRecord(record: DdbPrivateTransactionRetryRecord) {
+/** @internal Local validation shared with the retry codec; not an SDK entrypoint. */
+export function ownedPrivateTransactionRecord(record: DdbPrivateTransactionRetryRecord): {
+  retained: BuiltDdbPrivateTransaction; signedMembers: SignedMember[]; placement: DdbCurrentReadRoute;
+  base: PrivateTxnBaseV1; checked: ReturnType<typeof validatePrivateTransactionRecord>; maxMembers: number; roots: DdbPrivateTransactionRoot[];
+} {
   if (!record || record.kind !== 'private-transaction-retry-v1') return fail('invalid retry record');
   const maxMembers = limit(record.maxMembers), source = record.retained;
   if (!source || !Array.isArray(source.members) || source.members.length < 1 || source.members.length > maxMembers || !Array.isArray(source.sidecars) ||
@@ -266,13 +271,13 @@ function ownedRecord(record: DdbPrivateTransactionRetryRecord) {
     return JSON.parse(JSON.stringify({ ...unsigned, callerSig })) as SignedMember;
   });
   const placement = placementFor(base, record.completePlacement);
-  roots(record.roots, retained.members.length, base.initial_anchor);
-  return { retained, signedMembers, placement, base, checked };
+  const observations = roots(record.roots, retained.members.length, base.initial_anchor);
+  return { retained, signedMembers, placement, base, checked, maxMembers, roots: observations };
 }
 
 /** One explicitly addressed host's encrypted keeper custody. No host set/default or post-apply durability claim. */
 export async function storeDdbPrivateTransactionPayloads(input: DdbPrivateTransactionSendInput): Promise<DdbPrivateTransactionCustodyResult> {
-  const record = ownedRecord(input.record), c = context(input, record.base.database);
+  const record = ownedPrivateTransactionRecord(input.record), c = context(input, record.base.database);
   const result: DdbPrivateTransactionCustodyResult = { state: 'custody_unknown', committed: false, validatorId: c.validatorId, txnId: record.retained.id };
   let channel: Awaited<ReturnType<typeof open>> | undefined;
   try {
@@ -286,7 +291,7 @@ export async function storeDdbPrivateTransactionPayloads(input: DdbPrivateTransa
 
 /** Submit the SAME signed unit once. A lost/failed reply stays unknown; this never reprepares, stores or resubmits. */
 export async function submitDdbPrivateTransaction(input: DdbPrivateTransactionSendInput): Promise<DdbPrivateTransactionSubmission> {
-  const record = ownedRecord(input.record), c = context(input, record.base.database);
+  const record = ownedPrivateTransactionRecord(input.record), c = context(input, record.base.database);
   const result: DdbPrivateTransactionSubmission = { state: 'pending', committed: false, validatorId: c.validatorId,
     txnId: record.retained.id, operationHashes: [...record.checked.operationHashes], commitTxHash: null };
   let channel: Awaited<ReturnType<typeof open>> | undefined;

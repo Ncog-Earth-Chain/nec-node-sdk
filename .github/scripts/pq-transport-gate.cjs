@@ -18,6 +18,12 @@ const required = [
   'private transaction mutation uses its authenticated one-use hybrid socket: ddb_previewPrivateBatch',
   'private transaction mutation uses its authenticated one-use hybrid socket: ddb_putPayloadBatch',
   'private transaction mutation uses its authenticated one-use hybrid socket: ddb_submitSignedTransaction',
+  'private evidence uses its authenticated one-use hybrid socket: ddb_getPrivateAssignmentEvidence',
+  'private evidence uses its authenticated one-use hybrid socket: ddb_getPrivateTransactionSnapshotEvidence',
+  'private evidence uses its authenticated one-use hybrid socket: ddb_getPrivateTransactionFinalityEvidence',
+  'trusted validating-node factory authenticates bootstrap before signing evidence',
+  'trusted source bootstrap refuses before signing or private bytes: pin',
+  'trusted source bootstrap refuses before signing or private bytes: downgrade',
 ];
 if (report.success !== true || tests.length === 0 || report.numFailedTests !== 0 ||
     report.numPendingTests !== 0 || report.numTodoTests !== 0 ||
