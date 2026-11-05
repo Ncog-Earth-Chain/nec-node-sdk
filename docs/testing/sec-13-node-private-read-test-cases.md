@@ -24,7 +24,12 @@ TLS server fixture, not a validator or PostgreSQL service, unless stated otherwi
 
 ## Test cases
 
-All new BASIC names refer to `tests/ddb-private-read-node.test.ts` unless specified.
+All original BASIC names refer to `tests/ddb-private-read-node.pq.test.ts` unless
+specified. This is the required modern-runtime suite; it is explicitly separated
+from default Node20/22 discovery and never conditionally skipped. The ordinary
+`tests/ddb-private-read-node-legacy.test.ts` exercises fail-closed behavior on the
+retained runtimes. `npm run test:pq` and its CI job require the real hybrid suite
+and enforce no skipped/todo/missing required witnesses.
 
 | ID | Clause | Kind | Setup | Steps | Expected | Mutant that must turn it RED | Status | Test name / file |
 |---|---|---|---|---|---|---|---|---|
@@ -58,6 +63,9 @@ All new BASIC names refer to `tests/ddb-private-read-node.test.ts` unless specif
 | PNT-28 | 2,3,4 | live | Network loss, proxy replacement and multiple host assignments | Interrupt/retry explicit operations | No silent fallback or uncertain-outcome resend | Enable generic retries | LIVE | — |
 | PNT-29 | 2 | doc | Independently trusted chain-state source and endpoint publisher | Establish trust/custody, correct DER-SPKI pin, lease and proxy boundary | Reviewed actual operator/client setup | Treat resolver JSON as trusted | OWNER | — |
 | PNT-30 | 2,5 | doc | Future full-PQ authentication/browser/mobile architecture | Choose supported reviewed profile and qualify clients | No classical-auth path described as fully PQ-authenticated | Rename hybrid confidentiality as full PQ auth | OWNER | — |
+| PNT-31 | 2,5 | integration | Retained Node20.20.2/OpenSSL3.0.19 and real classical TLS server | Run complete default suite, including connector refusal | 637 pass, 30 existing declared skips; new refusal sends no HTTP | Replace opt-in connector with ordinary HTTPS | BASIC | retained runtime imports the connector and refuses a classical endpoint without private HTTP / tests/ddb-private-read-node-legacy.test.ts; r1-node20-default-full.log |
+| PNT-32 | 5 | integration | Actual default/PQ Jest configuration with local dependency-resolution adapter | List both discoveries and run modern suite | Default excludes only explicit PQ class; modern collects and passes all15 real TLS cases | Remove ignore override or required modern testMatch | BASIC | r1-default-discovery.log; r1-pq-discovery.log; r1-modern-pq.log |
+| PNT-33 | 1,2,5 | integration | Required modern report gate | Deliberately skip hybrid success, run Jest and gate, restore and rerun | Jest alone exits0 with one skip; mandatory gate exits1; restored15 pass and gate exits0 | Remove no-skip/required-witness gate from command | BASIC | r1-pq-skip-mutant-jest.log; r1-pq-skip-mutant-gate-red.log; r1-pq-restored.log; r1-pq-restored-gate.log |
 
 ## Mutants
 
@@ -66,6 +74,18 @@ failed: `Received promise resolved instead of rejected` (1 failed, 14 deselected
 the deselected cases are not qualification). Restored full suite: 15/15 PASS,
 3.094s, no skips. Source SHA before/after matches `author-evidence.json` in lane.
 Independent and integrator mutants belong to their separate reports.
+
+R1 fixed independently demonstrated default-CI incompatibility: the original
+unconditional hybrid fixture could not initialize on the retained Node20 runtime.
+The required modern suite is now separate, with no conditional skips and an
+unconditional pinned CI job. Consumer engines and dependencies are unchanged.
+Author checked default Node20 discovery/full suite and its existing skip ledger:
+637 PASS / 30 declared SKIP / 667 total, 23.748s. The 30 skips are existing
+sibling-IDE14 plus live16 cases, not transport qualification. Modern suite15/15
+PASS2.406s; skipping its success witness deliberately left Jest green but made
+the required gate RED, then restored15/15 PASS2.484s and gate GREEN. Source
+TypeScript passed. These are local checks using inherited production discovery
+with an absolute dependency-resolution adapter, not hosted Actions execution.
 
 TDD baseline failed compilation for missing connector module before implementation.
 A later behavioral test reproduced mutable caller pin acceptance before its fix.

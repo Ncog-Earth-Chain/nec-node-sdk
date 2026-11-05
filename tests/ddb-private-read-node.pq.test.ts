@@ -1,3 +1,4 @@
+// Required modern-runtime suite: npm run test:pq. Never conditionally skip hybrid negotiation.
 import { createServer, Server } from 'https';
 import { createHash, X509Certificate } from 'crypto';
 import { readFileSync } from 'fs';

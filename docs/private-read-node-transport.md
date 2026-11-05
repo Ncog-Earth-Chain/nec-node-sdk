@@ -69,6 +69,27 @@ that lack hybrid negotiation or group reporting refuse; public SDK functionality
 keeps its existing supported engine range. No Node built-in transport import is
 added to browser or React Native entry points.
 
+## Required validation commands
+
+Run both suites before publishing:
+
+- `npm test` / `npm run test:ci` run the retained general SDK suite, including a
+  real classical-endpoint refusal test that also runs on Node 20/22. These commands
+  explicitly exclude only `*.pq.test.ts` because those fixtures require a hybrid
+  TLS runtime.
+- `npm run test:pq` uses `jest.pq.config.js` to run the real hybrid suite
+  unconditionally. It then checks the JSON report: every collected assertion and
+  the named negotiation, SDK callback, downgrade and pin witnesses must pass.
+  Skipped/todo/missing required cases fail; an unsupported runtime fails rather
+  than reporting a skipped success.
+
+CI retains its existing Node 20/22 jobs and adds a separate unconditional
+`pq-transport` job pinned to Node 26.8.2. `prepublishOnly` requires both commands,
+so publishing needs a capable development runtime; this does not change the
+package's consumer `engines.node` range. The PQ job's runtime evidence includes
+the actual Node and OpenSSL versions. These are local test/configuration changes;
+a workflow definition is not evidence that hosted CI has executed.
+
 Hybrid key establishment protects confidentiality against recorded-session
 decryption, assuming the component algorithms remain secure. Ordinary RSA/ECDSA
 TLS certificate authentication is still classical. A certificate pin does not make
