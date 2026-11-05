@@ -215,3 +215,19 @@ jobs:
       # thing standing between the signer and the registry.
       - name: SigV2 replay-protection gate (dist/)
         run: node .github/scripts/sigv2-replay-gate.cjs
+
+  pq-transport:
+    # Separate required job: consumers retain the existing Node engine range,
+    # while this opted-in transport must prove actual hybrid TLS negotiation.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.8.2'
+          cache: npm
+      - run: npm ci
+      - name: Record transport runtime
+        run: node -p 'JSON.stringify({node:process.version,openssl:process.versions.openssl})'
+      - name: Required real hybrid TLS tests and no-skip gate
+        run: npm run test:pq

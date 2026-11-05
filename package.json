@@ -74,10 +74,11 @@
     "build": "rimraf dist && npm run script && rollup -c --bundleConfigAsCjs && npm run build:types",
     "test": "jest --coverage",
     "test:ci": "node -e \"require('fs').mkdirSync('coverage',{recursive:true})\" && jest --ci --json --outputFile=coverage/jest-report.json",
+    "test:pq": "node -e \"require('fs').mkdirSync('coverage',{recursive:true})\" && jest --config jest.pq.config.js --runInBand --ci --json --outputFile=coverage/pq-jest-report.json && node .github/scripts/pq-transport-gate.cjs",
     "gate:skips": "node .github/scripts/skip-ledger-gate.cjs",
     "gate:sigv2": "node .github/scripts/sigv2-replay-gate.cjs",
     "lint": "eslint src --ext .ts",
-    "prepublishOnly": "npm test && npm run build && npm run gate:sigv2"
+    "prepublishOnly": "npm test && npm run test:pq && npm run build && npm run gate:sigv2"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
