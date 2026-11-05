@@ -1107,9 +1107,16 @@ function submitResult(requestId: string, res: any): DdbSubmitReceipt {
   return { requestId, commitTxHash: '' };
 }
 
+class DdbAuthenticatedOutcomeRequired extends Error {
+  constructor() { super('private transaction requires authenticated outcome collection'); }
+}
+
 /** ddb_getCommitStatus result (mirrors PublicDdbAPI.GetCommitStatus). */
 export interface DdbCommitStatus {
   txHash: string;
+  /** Private transactions require the addressed outcome collector and explicit durability/finality policy. */
+  requiresAuthenticatedOutcome?: boolean;
+  outcomeMethod?: 'ddb_getPrivateTransactionOutcome' | (string & {});
   /**
    * "applied"  — included at block validity; the write is authoritative on chain.
    * "skipped"  — excluded on EVERY node; `reason` says why. The write did NOT happen.
@@ -1632,6 +1639,7 @@ export class Ddb {
     data: string | object,
     opts: DdbSignOptions = {},
   ): Promise<DdbSubmitReceipt> {
+    this.refusePrivateAutomatic();
     const signer = toDdbSigner(signerLike);
     const from = await signer.getAddress();
     const pub = await signer.getPublicKey();
@@ -1676,6 +1684,8 @@ export class Ddb {
    */
   async submitSignedOpDetailed(prepared: DdbPreparedOp, signature: Uint8Array | string,
     opts: { groupDurableReceipt?: boolean } = {}): Promise<DdbSubmitReceipt> {
+    this.refusePrivateAutomatic();
+    if ('txn' in prepared.envelope) throw new Error('transaction members require whole-unit submission');
     const sig = typeof signature === 'string' ? signature : '0x' + ddbBytesToHex(signature);
     const params: any[] = [{ ...prepared.envelope, callerSig: sig }];
     if (opts.groupDurableReceipt) params.push({ groupDurableReceipt: true });
@@ -1695,6 +1705,7 @@ export class Ddb {
     members: DdbTxnMemberSpec[],
     opts: DdbTxnOptions = {},
   ): Promise<DdbTxnReceipt> {
+    this.refusePrivateAutomatic();
     const signer = toDdbSigner(signerLike);
     const from = await signer.getAddress();
     const pub = await signer.getPublicKey();
@@ -1715,6 +1726,10 @@ export class Ddb {
    * member, in member order.
    */
   async submitSignedTransaction(prepared: DdbPreparedTxn, signatures: Array<Uint8Array | string>): Promise<DdbTxnReceipt> {
+    this.refusePrivateAutomatic();
+    if (prepared.members.some(m => m.envelope.type === 15)) {
+      throw new Error('private transaction requires addressed prepare/store/submit helpers');
+    }
     if (signatures.length !== prepared.members.length) {
       throw new Error(`${signatures.length} signatures for ${prepared.members.length} transaction members`);
     }
@@ -1743,6 +1758,7 @@ export class Ddb {
     attempt: (n: number) => Promise<{ members: DdbTxnMemberSpec[]; readVersion?: number | bigint | string; reads?: DdbTxnRead[] }>,
     opts: DdbTxnOptions & { maxAttempts?: number; intervalMs?: number; timeoutMs?: number } = {},
   ): Promise<DdbWriteOutcome & { id: string; attempts: number }> {
+    this.refusePrivateAutomatic();
     const max = opts.maxAttempts ?? 3;
     let lastReason = '';
     for (let n = 1; n <= max; n++) {
@@ -1754,7 +1770,10 @@ export class Ddb {
         const outcome = await this.waitForCommitted(receipt.commitTxHash, { intervalMs: opts.intervalMs, timeoutMs: opts.timeoutMs });
         return { ...outcome, id: receipt.id, attempts: n };
       } catch (err) {
+        // A private outcome requirement is terminal here, even if a later status reply omits it.
+        if (err instanceof DdbAuthenticatedOutcomeRequired) throw err;
         const status = await this.getCommitStatus(receipt.commitTxHash).catch(() => undefined);
+        if (status?.requiresAuthenticatedOutcome === true) throw new DdbAuthenticatedOutcomeRequired();
         if (status?.status !== 'skipped' || !isRetryableDdbTxnSkip(status.reason)) throw err;
         lastReason = String(status.reason);
       }
@@ -1767,10 +1786,12 @@ export class Ddb {
    * requestId is what the *Signed methods return. Resolves with the final status object; rejects on timeout.
    */
   async waitForEndorsement(requestId: string, opts: { intervalMs?: number; timeoutMs?: number } = {}): Promise<DdbEndorsementStatus> {
+    this.refusePrivateAutomatic();
     const interval = opts.intervalMs ?? 1000;
     const deadline = Date.now() + (opts.timeoutMs ?? 60000);
     for (;;) {
       const status = await this.getEndorsementStatus(requestId);
+      if (status?.requiresAuthenticatedOutcome === true) throw new DdbAuthenticatedOutcomeRequired();
       const s = String(status?.status ?? status?.state ?? '').toLowerCase();
       // The node's ddb_getEndorsementStatus reports "pending" then "completed" on a successful quorum
       // (gossip/ddb dual_consensus_flow). "completed" is the real terminal success; the rest are tolerant
@@ -1880,6 +1901,7 @@ export class Ddb {
 
   /** @deprecated Use createSchemaSigned. The node must run NEC_DDB_ALLOW_LOCAL_SIGN=1 to accept this. */
   createSchema(from: string, schemaName: string, definition: string | ContractDefinition): Promise<string> {
+    this.refusePrivateAutomatic();
     ddbWarnDeprecated('createSchema', 'createSchemaSigned');
     const def = typeof definition === 'string' ? definition : JSON.stringify(definition);
     return this.call('ddb_createSchema', [from, schemaName, def]);
@@ -1887,18 +1909,21 @@ export class Ddb {
 
   /** @deprecated Use callProcedureSigned. The node must run NEC_DDB_ALLOW_LOCAL_SIGN=1 to accept this. */
   callProcedure(from: string, schemaName: string, procedure: string, args: string[] = []): Promise<string> {
+    this.refusePrivateAutomatic();
     ddbWarnDeprecated('callProcedure', 'callProcedureSigned');
     return this.call('ddb_callProcedure', [from, schemaName, procedure, args]);
   }
 
   /** @deprecated Use grantRoleSigned. The node must run NEC_DDB_ALLOW_LOCAL_SIGN=1 to accept this. */
   grantRole(from: string, schemaName: string, role: string, account: string): Promise<string> {
+    this.refusePrivateAutomatic();
     ddbWarnDeprecated('grantRole', 'grantRoleSigned');
     return this.call('ddb_grantRole', [from, schemaName, role, account]);
   }
 
   /** @deprecated Use revokeRoleSigned. The node must run NEC_DDB_ALLOW_LOCAL_SIGN=1 to accept this. */
   revokeRole(from: string, schemaName: string, role: string, account: string): Promise<string> {
+    this.refusePrivateAutomatic();
     ddbWarnDeprecated('revokeRole', 'revokeRoleSigned');
     return this.call('ddb_revokeRole', [from, schemaName, role, account]);
   }
@@ -2191,11 +2216,13 @@ export class Ddb {
     txHash: string,
     opts: { intervalMs?: number; timeoutMs?: number; requireDurable?: boolean } = {},
   ): Promise<DdbCommitStatus> {
+    this.refusePrivateAutomatic();
     const interval = opts.intervalMs ?? 1000;
     const deadline = Date.now() + (opts.timeoutMs ?? 60000);
     let last: DdbCommitStatus | undefined;
     for (;;) {
       last = await this.getCommitStatus(txHash);
+      if (last?.requiresAuthenticatedOutcome === true) throw new DdbAuthenticatedOutcomeRequired();
       const status = String(last?.status ?? '').toLowerCase();
       if (status === 'skipped') {
         throw new Error(
@@ -2216,8 +2243,9 @@ export class Ddb {
    * `minVersion`. Throws on SKIPPED (never ack-then-reject) and on timeout (not committed as far as
    * this node can say; resolve it later by the same hash).
    *
-   * "Durable to policy" today is durable on the answering node: the node exposes no cross-replica
-   * durability signal yet, and every node holds every database (R = N) until PLACE-01..03.
+   * This legacy/public helper reports durability on the answering node. Private transactions require
+   * collectDdbPrivateTransactionOutcome with explicit required hosts and independently verified
+   * canonical finality; a local marker cannot satisfy that policy.
    */
   async waitForCommitted(
     txHash: string, opts: { intervalMs?: number; timeoutMs?: number } = {},
@@ -2385,6 +2413,10 @@ export class Ddb {
     const params: unknown[] = [token, procedure, args];
     if (consistency) params.push(withReadToken(consistency));
     return this.call('ddb_tokenCallReadProcedure', params);
+  }
+
+  private refusePrivateAutomatic(): void {
+    if (this.options.privateRouting) throw new Error('private transaction requires addressed helpers and authenticated outcome collection');
   }
 
   private refusePrivateCapability(): void {

@@ -75,8 +75,19 @@ test('private transaction outcome uses the exact authenticated hybrid socket wit
   expect(f.sockets.size).toBe(1);
   await expect(channel.send('ddb_getPrivateTransactionOutcome', params)).rejects.toThrow('already consumed');
   const denied = await connectDdbNodePrivateRead(f.connection, f.trusted, { ca: cert });
-  await expect(denied.send('ddb_putPayloadBatch', params)).rejects.toThrow('signed read');
+  await expect(denied.send('ddb_submitSignedOp', params)).rejects.toThrow('private transport');
   expect(f.bodies).toHaveLength(1);
+});
+
+test.each(['ddb_previewPrivateBatch', 'ddb_putPayloadBatch', 'ddb_submitSignedTransaction'])
+('private transaction mutation uses its authenticated one-use hybrid socket: %s', async method => {
+  const f = await fixture('X25519MLKEM768', { jsonrpc: '2.0', id: 1, result: hash });
+  const channel = await connectDdbNodePrivateRead(f.connection, f.trusted, { ca: cert });
+  const params = method === 'ddb_putPayloadBatch' ? [[{ private: 'signed-unit' }], [{ payload: 'private-opening' }]] : [[{ private: 'signed-unit' }]];
+  await expect(channel.send(method, params)).resolves.toBe(hash);
+  expect(JSON.parse(f.bodies[0])).toEqual({ jsonrpc: '2.0', id: 1, method, params });
+  expect(f.sockets.size).toBe(1);
+  await expect(channel.send(method, params)).rejects.toThrow('already consumed');
 });
 
 test.each(['X25519MLKEM768', 'X25519'])('actual Ddb private-read callback uses connector and refuses downgrade: %s', async curve => {

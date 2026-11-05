@@ -76,7 +76,11 @@ export {
 export { Wallet, Signer, type TxParams } from './wallet';
 // Offline private-transaction grammar/preparation; no corresponding submit RPC is enabled.
 export * from './ddb-private-txn';
-export * from './ddb-private-txn-outcome';
+export { readDdbPrivateTransactionOutcome, collectDdbPrivateTransactionOutcome } from './ddb-private-txn-outcome';
+export type { DdbPrivateTxnOutcomeResolver, DdbPrivateTxnOutcomeReadInput, DdbPrivateTxnFinalityCandidate,
+  DdbPrivateTxnLocalDurable, DdbPrivateTxnLocalOutcome, DdbPrivateTxnExpectation, DdbPrivateTxnCollectionInput,
+  DdbPrivateTxnHostDisposition, DdbPrivateTxnCollection } from './ddb-private-txn-outcome';
+export * from './ddb-private-txn-online';
 export {
   buildDdbCommitment, deriveDdbDigestKey, ddbPayloadCommitment, encodeDdbCommitmentEnvelope, decodeDdbCommitmentEnvelope,
   DDB_COMMITMENT_PAYLOAD_MAX_BYTES, type DdbCommitmentEnvelope, type DdbTagDelta, type DdbPayloadSidecar,
