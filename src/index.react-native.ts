@@ -25,6 +25,7 @@ export {
   type DdbSubmitReceipt, type DdbCommitStatus,
   type DdbFilter, type DdbFilterOp, type DdbQueryOptions, type DdbSignOptions, type DdbUpdateSchemaOptions,
   type DdbRow, type DdbSchemaInfo, type DdbEndorsementStatus, type DdbConsensusStats,
+  type DdbContractAlias, type DdbContractAliasList,
   type DdbValidatorSet, type DdbStorageStats,
   // DB-02 (NEC-78), owner ruling 17: opt-in exact int8 reads (bigint), see DdbReadFormat.
   ddbExactRows, DDB_EXACT_NUMBERS_UNSUPPORTED, type DdbReadFormat, type DdbExactRow, type DdbReadColumn, type DdbExactVersionedRows,

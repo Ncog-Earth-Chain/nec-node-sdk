@@ -1,0 +1,26 @@
+{
+  "chainId": "1",
+  "owner": "0x1111111111111111111111111111111111111111",
+  "otherOwner": "0x2222222222222222222222222222222222222222",
+  "a": {
+    "contract_address": "0x00000000000000000000000000000000000000a1",
+    "db_name": "c_00000000000000000000000000000000000000a1",
+    "contract_name": "Shared display name",
+    "owner_address": "0x1111111111111111111111111111111111111111",
+    "tombstoned": false
+  },
+  "b": {
+    "contract_address": "0x00000000000000000000000000000000000000b2",
+    "db_name": "c_00000000000000000000000000000000000000b2",
+    "contract_name": "Shared display name",
+    "owner_address": "0x1111111111111111111111111111111111111111",
+    "tombstoned": false
+  },
+  "c": {
+    "contract_address": "0x00000000000000000000000000000000000000c3",
+    "db_name": "c_00000000000000000000000000000000000000c3",
+    "contract_name": "Other wallet",
+    "owner_address": "0x2222222222222222222222222222222222222222",
+    "tombstoned": false
+  }
+}
