@@ -58,6 +58,9 @@ export interface DdbAuthenticatedReadTransport {
   readonly send: RpcSend;
 }
 
+/** Supplied by independently trusted application state, never resolver JSON alone. */
+export type DdbTrustedReadEndpoint = DdbAuthenticatedReadTransport['binding'];
+
 export interface DdbPrivateReadPolicy {
   /**
    * Authenticate finalized header, active rules, governed manager/runtime and the full assignment from
