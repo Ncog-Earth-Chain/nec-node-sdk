@@ -69,6 +69,8 @@ export {
   verifyHostGroupRecord, HOST_GROUP_RECORD_DOMAIN, HOST_GROUP_RECORD_HEAD_BYTES, type HostGroupRecordJSON,
 } from './ddb-host-group';
 export { Wallet, Signer, type TxParams } from './wallet';
+// Offline private-transaction grammar/preparation; no corresponding submit RPC is enabled.
+export * from './ddb-private-txn';
 export {
   buildDdbCommitment, deriveDdbDigestKey, ddbPayloadCommitment, encodeDdbCommitmentEnvelope, decodeDdbCommitmentEnvelope,
   DDB_COMMITMENT_PAYLOAD_MAX_BYTES, type DdbCommitmentEnvelope, type DdbTagDelta, type DdbPayloadSidecar,

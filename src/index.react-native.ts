@@ -73,6 +73,8 @@ export {
 } from './ddb-capability';
 // The native tx-signer is WASM-free and RN-safe — RN apps sign upgraded-format txs through it.
 export { Wallet, Signer, type TxParams } from './wallet';
+// Offline private-transaction grammar/preparation; no corresponding submit RPC is enabled.
+export * from './ddb-private-txn';
 export {
   signTransactionMLDSA87, signRotatedTransactionMLDSA87, privateKeyToAddress, publicKeyToAddress, decodeRLPTransaction,
   SIGVER_MLDSA_V2, SIGVER_ROTATED,
