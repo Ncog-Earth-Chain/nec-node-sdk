@@ -3,10 +3,11 @@ import {
   parseDdbCurrentReadRoute,
   type DdbAuthenticatedReadTransport,
   type DdbPrivateReadConnection,
+  type DdbTrustedReadEndpoint,
 } from './ddb-private-read';
 
 /** Supplied by independently trusted application state, never copied from resolver JSON alone. */
-export type DdbNodeTrustedReadEndpoint = DdbAuthenticatedReadTransport['binding'];
+export type DdbNodeTrustedReadEndpoint = DdbTrustedReadEndpoint;
 
 export interface DdbNodePrivateReadTransportOptions {
   /** Optional explicit CA roots. Normal certificate chain and hostname checks remain mandatory. */

@@ -1,5 +1,36 @@
 # Private transactions with an explicitly trusted validating node
 
+The shared `createDdbTrustedPrivatePolicy` and `createDdbPrivateClient` factories
+are available from Node, browser and React Native entrypoints. They require
+concrete application-supplied authenticated channels and an existing
+`DdbPrivateRetryStore`; exporting common composition does not supply browser or
+mobile transport, durable storage, wallet approval or a native helper.
+
+`DdbTrustedPrivateOptions` extends `DdbPrivateAuthority` with the local signer,
+`connectEvidence(source)` and `connectHost(connection, independentlyTrustedBinding)`.
+The evidence connector returns an exact source binding, `send` and `close`;
+the host connector returns `DdbAuthenticatedReadTransport` plus `close`.
+The application must implement the real required handshake and one-use channel.
+The common policy checks returned bindings and compares full source evidence;
+a callback returning matching fields is neither TLS attestation nor a proof.
+Evidence source mismatch closes before signing or sending. Host mismatch closes
+before a private request can use the returned transport. Captured connectors and
+owned source/route/endpoint values cannot be replaced by later option changes.
+
+`createDdbPrivateClient({ authority, resolver, store, loadDigestKey })` retains
+the preparation, persisted custody, attempted submission and collection flow
+below. `DdbPrivatePrepareInput` retains the explicit preparation/custody/submit
+recipients and required hosts. Its store must actually implement the existing
+atomic persistence contract; wrapping browser storage or a callback in a promise
+does not qualify it. The common client reuses the exact retry codec and existing
+transaction helpers, with no second serializer or transaction state machine.
+See the dependency-only [common example](../examples/ddb-private-common.ts).
+
+`createDdbTrustedNodePrivatePolicy`, `connectDdbNodePrivateEvidence` and
+`createDdbPrivateReferenceClient` keep their existing APIs. The Node wrappers own
+copied TLS options and select the actual reviewed Node connectors; Node TLS,
+filesystem encryption and store modules remain outside browser/RN exports.
+
 `createDdbTrustedNodePrivatePolicy` supplies the real source-backed callbacks for
 the [private transaction helpers](private-transaction-mutations.md) and their
 [outcome collector](private-transaction-outcomes.md). The application must select

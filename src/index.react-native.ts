@@ -50,7 +50,7 @@ export {
 } from './ddb-resolve';
 export {
   ddbSignedReadHome, type DdbCurrentReadRoute, type DdbCurrentReadMember, type DdbPrivateReadOptions,
-  type DdbPrivateReadPolicy, type DdbPrivateReadConnection, type DdbPrivateReadEndpoint, type DdbAuthenticatedReadTransport,
+  type DdbPrivateReadPolicy, type DdbPrivateReadConnection, type DdbPrivateReadEndpoint, type DdbAuthenticatedReadTransport, type DdbTrustedReadEndpoint,
 } from './ddb-private-read';
 export {
   verifyRegistryProof, verifyPlacementProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_RUNTIME_CODE_HASH,
@@ -85,6 +85,11 @@ export type { DdbPrivateTransactionCall, DdbPrivateTransactionRoot, DdbPrivatePr
 export { encodeDdbPrivateRetryState, decodeDdbPrivateRetryState, DDB_PRIVATE_RETRY_MAX_BYTES, DDB_PRIVATE_RETRY_WORST_CASE_BYTES } from './ddb-private-retry';
 export type { DdbPrivateRetryState, DdbPrivateRetryPolicy, DdbPrivateRetryStore } from './ddb-private-retry';
 export type { DdbPrivateAuthority, DdbPrivateEvidenceSource, DdbPrivateAssignmentEvidence } from './ddb-private-evidence';
+// Common composition only: applications must supply concrete authenticated channels and persistence.
+export { createDdbTrustedPrivatePolicy } from './ddb-private-trust';
+export type { DdbTrustedPrivateOptions, DdbPrivateEvidenceChannel, DdbPrivateHostChannel } from './ddb-private-trust';
+export { createDdbPrivateClient } from './ddb-private-client';
+export type { DdbPrivateClientOptions, DdbPrivatePrepareInput } from './ddb-private-client';
 export {
   signTransactionMLDSA87, signRotatedTransactionMLDSA87, privateKeyToAddress, publicKeyToAddress, decodeRLPTransaction,
   SIGVER_MLDSA_V2, SIGVER_ROTATED,
