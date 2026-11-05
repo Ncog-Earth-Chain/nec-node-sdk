@@ -55,6 +55,11 @@ export {
   ddbSignedReadHome, type DdbCurrentReadRoute, type DdbCurrentReadMember, type DdbPrivateReadOptions,
   type DdbPrivateReadPolicy, type DdbPrivateReadConnection, type DdbPrivateReadEndpoint, type DdbAuthenticatedReadTransport,
 } from './ddb-private-read';
+// Actual Node TLS transport; deliberately absent from browser and React Native entry points.
+export {
+  connectDdbNodePrivateRead, type DdbNodeTrustedReadEndpoint,
+  type DdbNodePrivateReadTransportOptions, type DdbNodeAuthenticatedReadTransport,
+} from './ddb-private-read-node';
 export {
   verifyRegistryProof, verifyPlacementProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_RUNTIME_CODE_HASH,
   type RegistryProofJSON, type PlacementRecordJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
