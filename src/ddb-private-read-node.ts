@@ -148,8 +148,9 @@ export async function connectDdbNodePrivateRead(
       consumed = true;
       try {
         if (failure || socket.destroyed) throw failure ?? new Error('private read channel closed');
-        if (!['ddb_signedSelect', 'ddb_signedCallReadProcedure', 'ddb_getPrivateTransactionOutcome'].includes(method) || !Array.isArray(params)) {
-          throw new Error('private transport accepts only a signed read');
+        if (!['ddb_signedSelect', 'ddb_signedCallReadProcedure', 'ddb_getPrivateTransactionOutcome',
+          'ddb_previewPrivateBatch', 'ddb_putPayloadBatch', 'ddb_submitSignedTransaction'].includes(method) || !Array.isArray(params)) {
+          throw new Error('private transport accepts only a signed read or private transaction');
         }
         const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), 'utf8');
         if (body.length > requestLimit) throw new Error('private read request exceeds byte limit');

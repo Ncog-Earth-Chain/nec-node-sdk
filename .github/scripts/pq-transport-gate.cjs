@@ -15,6 +15,9 @@ const required = [
   'classical negotiated group refuses before request bytes',
   'wrong trusted pin refuses before request bytes',
   'private transaction outcome uses the exact authenticated hybrid socket without widening mutation access',
+  'private transaction mutation uses its authenticated one-use hybrid socket: ddb_previewPrivateBatch',
+  'private transaction mutation uses its authenticated one-use hybrid socket: ddb_putPayloadBatch',
+  'private transaction mutation uses its authenticated one-use hybrid socket: ddb_submitSignedTransaction',
 ];
 if (report.success !== true || tests.length === 0 || report.numFailedTests !== 0 ||
     report.numPendingTests !== 0 || report.numTodoTests !== 0 ||

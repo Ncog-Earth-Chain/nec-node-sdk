@@ -5,6 +5,8 @@ observation. `collectDdbPrivateTransactionOutcome` makes one pass across an expl
 required durability set and returns committed only when every required host has
 matching exact results and the application's independent canonical-finality verifier
 accepts the completed transaction. These functions do not prepare or submit mutations.
+Use the separate [prepare/custody/submit helpers](private-transaction-mutations.md)
+to create and retain the exact unit before invoking this collector.
 
 Use a canonical contract database (`c_` followed by the lowercase contract address).
 Wallet aliases must resolve to that existing contract before signing; aliases never

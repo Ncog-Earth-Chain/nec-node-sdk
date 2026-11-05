@@ -316,7 +316,8 @@ interface RetainedSnapshot {
   readonly payloadCommitments: readonly string[];
 }
 
-function snapshotRetained(input: DdbPrivateTxnOutcomeReadInput, retained: BuiltDdbPrivateTransaction): RetainedSnapshot {
+/** @internal Shared local record validation; deliberately not exported through SDK entrypoints. */
+export function validatePrivateTransactionRecord(input: Pick<DdbPrivateTxnOutcomeReadInput, 'chain' | 'database' | 'caller' | 'txnId' | 'maxMembers'>, retained: BuiltDdbPrivateTransaction): RetainedSnapshot {
   if (!retained || fixedHex(retained.id, 32, true) !== input.txnId || !Array.isArray(retained.members) || !Array.isArray(retained.sidecars) ||
       retained.members.length < 1 || retained.members.length > input.maxMembers || retained.sidecars.length !== retained.members.length) return fail('invalid retained transaction');
   const count = retained.members.length;
@@ -388,7 +389,7 @@ export async function collectDdbPrivateTransactionOutcome(input: DdbPrivateTxnCo
   const requiredHosts = Array.from(input.requiredHosts, recipient);
   if (requiredHosts.some((id, i) => i > 0 && id <= requiredHosts[i - 1])) return fail('required hosts must be unique and sorted');
   const read = snapshotRead({ ...input, validatorId: requiredHosts[0], mode: 'result' });
-  const retained = snapshotRetained(read, input.retained);
+  const retained = validatePrivateTransactionRecord(read, input.retained);
   const placement = activeRoute('0x' + read.database.slice(2), input.completePlacement);
   const b = retained.base;
   if (placement.block !== '0x' + b.block.toString(16) || placement.blockHash !== b.block_hash || placement.stateRoot !== b.state_root ||
