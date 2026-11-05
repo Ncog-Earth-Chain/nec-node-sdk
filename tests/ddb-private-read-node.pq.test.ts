@@ -7,7 +7,11 @@ import { AddressInfo, Socket } from 'net';
 import { keccak_256 } from '@noble/hashes/sha3';
 import { connectDdbNodePrivateRead } from '../src/ddb-private-read-node';
 import { parseDdbCurrentReadRoute, type DdbPrivateReadConnection } from '../src/ddb-private-read';
-import { Ddb, type DdbSigner } from '../src/ddb';
+import { Ddb, buildDdbSignedReadProcedure, type DdbSigner } from '../src/ddb';
+import { encodePrivateTxnBaseV1, encodePrivateTxnIntentV1 } from '../src/ddb-private-txn';
+import { connectDdbNodePrivateEvidence, createDdbTrustedNodePrivatePolicy } from '../src/ddb-private-trust-node';
+import { ENDPOINT_DIRECTORY_RUNTIME_CODE_HASH } from '../src/ddb-private-evidence';
+import { privateClientFixture, hex as fixtureHex, pub as fixturePub, chain as fixtureChain, database as fixtureDatabase, caller as fixtureCaller } from './fixtures/private-client';
 
 const cert = readFileSync(join(__dirname, 'fixtures/pq-node-cert.pem'));
 const key = readFileSync(join(__dirname, 'fixtures/pq-node-key.pem'));
@@ -64,6 +68,56 @@ test('real hybrid connection authenticates before sending and uses one socket', 
   expect(JSON.parse(f.bodies[0])).toEqual({ jsonrpc: '2.0', id: 1, method: 'ddb_signedSelect', params: [{ secret: 'tenant-private-query' }] });
   expect(f.sockets.size).toBe(1);
   await expect(channel.send('ddb_signedSelect', [])).rejects.toThrow('already consumed');
+});
+
+test.each(['ddb_getPrivateAssignmentEvidence', 'ddb_getPrivateTransactionSnapshotEvidence', 'ddb_getPrivateTransactionFinalityEvidence'])
+('private evidence uses its authenticated one-use hybrid socket: %s', async method => {
+  const f = await fixture('X25519MLKEM768', { jsonrpc: '2.0', id: 1, result: { observed: true } });
+  const source = { validatorId: 1, address, url: f.trusted.url, tlsKeyHash: pin };
+  const channel = await connectDdbNodePrivateEvidence(source, { ca: cert });
+  const v = privateClientFixture();
+  const intent = { type: BigInt(7), data: new TextEncoder().encode(String(v.input.members[0].data)), timestamp: BigInt(1800000000),
+    gas_limit: BigInt(1000), nonce: BigInt(100), expiry: BigInt(1800000300), key_version: BigInt(1) };
+  const selectors: Record<string, string> = { ddb_getPrivateAssignmentEvidence: '@ddb/private-assignment-evidence/v1',
+    ddb_getPrivateTransactionSnapshotEvidence: '@ddb/private-txn-snapshot-evidence/v1', ddb_getPrivateTransactionFinalityEvidence: '@ddb/private-txn-finality-evidence/v1' };
+  const args = method === 'ddb_getPrivateAssignmentEvidence' ? ['1', 'current'] : method === 'ddb_getPrivateTransactionSnapshotEvidence'
+    ? ['1', fixtureHex(encodePrivateTxnBaseV1(v.base)), fixtureHex(encodePrivateTxnIntentV1(intent))] : ['1', '0x20', hash];
+  const prepared = buildDdbSignedReadProcedure(fixtureChain, fixtureDatabase, selectors[method], args, fixtureCaller, fixturePub);
+  const params = [{ ...prepared.envelope, callerSig: fixtureHex(await v.input.signer.signDdbHash(prepared.hash)) }];
+  expect(f.bodies).toEqual([]);
+  await expect(channel.send(method, params)).resolves.toEqual({ observed: true });
+  expect(JSON.parse(f.bodies[0])).toEqual({ jsonrpc: '2.0', id: 1, method, params });
+  expect(f.sockets.size).toBe(1);
+  await expect(channel.send(method, params)).rejects.toThrow('already consumed');
+  const denied = await connectDdbNodePrivateEvidence(source, { ca: cert });
+  await expect(denied.send('ddb_submitSignedTransaction', [])).rejects.toThrow('private transport');
+  expect(f.bodies).toHaveLength(1);
+});
+
+test('trusted validating-node factory authenticates bootstrap before signing evidence', async () => {
+  const v = privateClientFixture();
+  const result = { chain: fixtureChain, placement: v.placement, maxMembers: '0x4', endpointDirectory: address,
+    endpointRuntime: ENDPOINT_DIRECTORY_RUNTIME_CODE_HASH, blockTime: '0x1',
+    hosts: v.placement.members.map(m => ({ ...m, publicKey: fixtureHex(fixturePub), auth: address,
+      expiry: '0xffffffffffffffff', live: true, endpoints: [{ scheme: 'https', url: 'https://example.com', tlsKeyHash: pin }] })) };
+  const f = await fixture('X25519MLKEM768', { jsonrpc: '2.0', id: 1, result });
+  const trust = createDdbTrustedNodePrivatePolicy({ trust: 'trusted-validating-node', chain: fixtureChain, database: fixtureDatabase,
+    caller: fixtureCaller, signer: v.input.signer, source: { validatorId: 9, address: v.placement.members[2].address, url: f.trusted.url, tlsKeyHash: pin }, sourceTls: { ca: cert } });
+  expect((await trust.readCurrentAssignment()).placement).toEqual(v.placement);
+  const request = JSON.parse(f.bodies[0]);
+  expect(request.method).toBe('ddb_getPrivateAssignmentEvidence');
+  expect(request.params[0].procedure).toBe('@ddb/private-assignment-evidence/v1');
+  expect(request.params[0].args).toEqual(['9', 'current']);
+  expect(v.signDdbHash).toHaveBeenCalledTimes(1); expect(f.sockets.size).toBe(1);
+});
+
+test.each(['pin', 'downgrade'])('trusted source bootstrap refuses before signing or private bytes: %s', async fault => {
+  const v = privateClientFixture(), f = await fixture(fault === 'downgrade' ? 'X25519' : 'X25519MLKEM768');
+  const trust = createDdbTrustedNodePrivatePolicy({ trust: 'trusted-validating-node', chain: fixtureChain, database: fixtureDatabase,
+    caller: fixtureCaller, signer: v.input.signer, source: { validatorId: 9, address: v.placement.members[2].address, url: f.trusted.url,
+      tlsKeyHash: fault === 'pin' ? hash : pin }, sourceTls: { ca: cert } });
+  await expect(trust.readCurrentAssignment()).rejects.toThrow('private evidence unavailable');
+  expect(v.signDdbHash).not.toHaveBeenCalled(); expect(f.bodies).toEqual([]);
 });
 
 test('private transaction outcome uses the exact authenticated hybrid socket without widening mutation access', async () => {

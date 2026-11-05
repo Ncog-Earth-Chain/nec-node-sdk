@@ -149,5 +149,8 @@ routing before serialization or Provider work; their unconfigured public wire is
 An unmarked op7 intention or bare hash does not encode database privacy. These
 guards cannot infer stripped metadata or protect direct raw Provider calls.
 `getCommitStatus` remains diagnostic. There is no portable quorum certificate,
-automatic trusted context/finality adapter, required-host default, replacement
-policy, new signing domain, Ready activation or deployment in this SDK slice.
+required-host default, replacement policy, new signing domain, Ready activation
+or deployment in this SDK slice. The separately opt-in
+[trusted validating-node adapter and reference client](private-client-trust.md)
+now supply concrete source-backed context/finality callbacks and encrypted local
+retry persistence when the application explicitly configures that authority.

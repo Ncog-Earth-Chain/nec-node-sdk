@@ -72,7 +72,12 @@ export { readDdbPrivateTransactionOutcome, collectDdbPrivateTransactionOutcome }
 export type { DdbPrivateTxnOutcomeResolver, DdbPrivateTxnOutcomeReadInput, DdbPrivateTxnFinalityCandidate,
   DdbPrivateTxnLocalDurable, DdbPrivateTxnLocalOutcome, DdbPrivateTxnExpectation, DdbPrivateTxnCollectionInput,
   DdbPrivateTxnHostDisposition, DdbPrivateTxnCollection } from './ddb-private-txn-outcome';
-export * from './ddb-private-txn-online';
+export { prepareDdbPrivateTransaction, storeDdbPrivateTransactionPayloads, submitDdbPrivateTransaction } from './ddb-private-txn-online';
+export type { DdbPrivateTransactionCall, DdbPrivateTransactionRoot, DdbPrivatePreparedSnapshotRequest, DdbPrivateTransactionPrepareInput,
+  DdbPrivateTransactionRetryRecord, DdbPrivateTransactionSendInput, DdbPrivateTransactionCustodyResult, DdbPrivateTransactionSubmission } from './ddb-private-txn-online';
+export { encodeDdbPrivateRetryState, decodeDdbPrivateRetryState, DDB_PRIVATE_RETRY_MAX_BYTES, DDB_PRIVATE_RETRY_WORST_CASE_BYTES } from './ddb-private-retry';
+export type { DdbPrivateRetryState, DdbPrivateRetryPolicy, DdbPrivateRetryStore } from './ddb-private-retry';
+export type { DdbPrivateAuthority, DdbPrivateEvidenceSource, DdbPrivateAssignmentEvidence } from './ddb-private-evidence';
 export {
   signTransactionMLDSA87, signRotatedTransactionMLDSA87, privateKeyToAddress, publicKeyToAddress, decodeRLPTransaction,
   SIGVER_MLDSA_V2, SIGVER_ROTATED,
