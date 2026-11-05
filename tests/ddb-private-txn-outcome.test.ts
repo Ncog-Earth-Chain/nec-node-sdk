@@ -234,6 +234,20 @@ describe('private transaction finality and explicit durability collection', () =
     expect(f.resolveCurrent).not.toHaveBeenCalled();
   });
 
+  test('sparse required-host arrays refuse before any trust callback or private work', async () => {
+    const f = fixture();
+    const requiredHosts = new Array<number>(3);
+    requiredHosts[0] = 2; requiredHosts[2] = 7;
+    await expect(collectDdbPrivateTransactionOutcome({ ...f.collect, requiredHosts })).rejects.toThrow();
+    expect(f.verifyHistoricalPlacement).not.toHaveBeenCalled();
+    expect(f.verifyFinality).not.toHaveBeenCalled();
+    expect(f.resolveCurrent).not.toHaveBeenCalled();
+    expect(f.hostEndpoints).not.toHaveBeenCalled();
+    expect(f.connect).not.toHaveBeenCalled();
+    expect(f.signDdbHash).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
   test('one missing host, unavailable host, or duplicate returned identity cannot commit', async () => {
     for (const response of ['pending', 'unavailable', 'duplicate']) {
       const f = fixture(); f.responses.set(7, response === 'pending' ? f.pending(7) : response === 'duplicate' ? f.durable(2) : new Error('private endpoint error'));

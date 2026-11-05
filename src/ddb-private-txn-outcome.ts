@@ -384,7 +384,8 @@ function candidateKey(o: DdbPrivateTxnFinalityCandidate): string {
  */
 export async function collectDdbPrivateTransactionOutcome(input: DdbPrivateTxnCollectionInput): Promise<DdbPrivateTxnCollection> {
   if (!Array.isArray(input.requiredHosts) || input.requiredHosts.length === 0 || input.requiredHosts.length > 64) return fail('explicit required hosts are required');
-  const requiredHosts = input.requiredHosts.map(recipient);
+  // Array.from visits holes too; sparse caller policy must refuse before any callback or private work.
+  const requiredHosts = Array.from(input.requiredHosts, recipient);
   if (requiredHosts.some((id, i) => i > 0 && id <= requiredHosts[i - 1])) return fail('required hosts must be unique and sorted');
   const read = snapshotRead({ ...input, validatorId: requiredHosts[0], mode: 'result' });
   const retained = snapshotRetained(read, input.retained);

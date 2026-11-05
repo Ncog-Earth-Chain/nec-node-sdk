@@ -17,7 +17,7 @@ Status legend: BASIC = written and green in run 22 | DEFERRED = to write and run
 
 ## Test cases
 
-Author validation: 82 tests across five focused suites, source typecheck, 16 actual modern Node hybrid TLS tests with the required no-skip report gate, five bundles and declarations passed. The new outcome suite contains 16 tests. Test references name `tests/ddb-private-txn-outcome.test.ts` unless another file is given. There are 21 BASIC, 7 DEFERRED, 1 LIVE and 1 OWNER cases. Independent review/root integration are separate.
+Initial author validation: 82 tests across five focused suites, source typecheck, 16 actual modern Node hybrid TLS tests with the required no-skip report gate, five bundles and declarations passed. Independent review PTO-REVIEW-01 added a persisted sparse-array refusal test; it failed before the narrow correction, then the complete outcome suite passed 17/17 with source typecheck. Test references name `tests/ddb-private-txn-outcome.test.ts` unless another file is given. There are 22 BASIC, 7 DEFERRED, 1 LIVE and 1 OWNER cases. Reviewer confirmation/root integration are separate.
 
 | ID | Clause | Kind | Setup | Steps | Expected | Mutant that must turn it RED | Status | Test name / file (BASIC only) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -51,12 +51,14 @@ Author validation: 82 tests across five focused suites, source typecheck, 16 act
 | PTO-28 | 1,2,5,6 | live | Completed private admission and authorized selected-host testnet, application trust adapter | Prepare/submit/read across real required hosts; remove one host and alter chain evidence | Completion only after canonical finality plus all required durable results | Force local-only committed | LIVE | — |
 | PTO-29 | 2,8 | owner | Qualified browser/mobile PQ transport and trusted-state/finality adapters | Integrate/export same common collector on each supported client | No generic HTTPS/PQ assertion masquerades as actual qualified channel | Return unverified policy assertions | OWNER | — |
 | PTO-30 | 8 | doc | Current scoped implementation and source contracts | Review public comments, tagged ledger, activation/SQL/alias limits | No portable cert, light-client, mutation-admission, global-policy, live or Ready claim | Describe trusted callbacks as SDK cryptographic verification | DEFERRED | — |
+| PTO-31 | 3,5 | unit | Sparse three-slot required-host array with IDs at indexes 0 and 2 | Collect | Reject before historical/finality callbacks, discovery, endpoint lookup, connect, sign or send | Use map instead of visiting every index | BASIC | `sparse required-host arrays refuse before any trust callback or private work` |
 
 ## Mutants
 
 - Author: replaced only `if (verified !== true)` with `if (false)` after matching required-host observations. PTO-10 failed semantically: expected `committed: false`, `state: pending`, `reason: finality_unverified`; received `committed: true`, `state: committed`. Restored the exact source and the same targeted test passed. Evidence: outside-repository `wt4/private-txn-online-sdk/finality-mutant-{red,restored}.log`. Other tests were filtered only in these targeted mutant runs; full focused and real-TLS validation had zero skips.
 - Root: omit one required-host durability obligation without changing other checks. PTO-13 must fail. Separate integration evidence is required.
 - Independent review: select a distinct endpoint-binding or retained-operation identity guard. Do not repeat either primary discriminator as independent evidence.
+- PTO-REVIEW-01 correction: the persisted sparse-array test first failed because collection resolved pending with an undefined-ID disposition after private work. Changed only policy snapshotting to `Array.from(input.requiredHosts, recipient)` so holes undergo the existing recipient check. Complete outcome suite 17/17 and source typecheck then passed; reviewer artifacts remain separate and untouched.
 
 ## Live and owner items
 
