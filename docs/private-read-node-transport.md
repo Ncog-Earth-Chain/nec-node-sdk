@@ -1,9 +1,12 @@
 # Node private-read transport
 
 The opt-in `connectDdbNodePrivateRead` helper implements the connection portion of
-`DdbPrivateReadPolicy` using Node's real TLS and HTTPS clients. It accepts only the
-two existing signed-read RPC methods. It does not enable private transactions,
-replace a trusted chain-state verifier, or provide browser/mobile transport.
+`DdbPrivateReadPolicy` using Node's real TLS and HTTPS clients. It accepts only
+`ddb_signedSelect`, `ddb_signedCallReadProcedure` and the signed
+`ddb_getPrivateTransactionOutcome` lookup. It does not enable private mutation
+admission, replace a trusted chain-state verifier, or provide browser/mobile transport.
+The [private outcome collector](private-transaction-outcomes.md) uses a fresh
+connection for each explicitly addressed required storage host.
 
 The application must first authenticate the current assignment and the chosen
 validator's current endpoint using independently trusted state. Pass that trusted
@@ -79,7 +82,7 @@ Run both suites before publishing:
   TLS runtime.
 - `npm run test:pq` uses `jest.pq.config.js` to run the real hybrid suite
   unconditionally. It then checks the JSON report: every collected assertion and
-  the named negotiation, SDK callback, downgrade and pin witnesses must pass.
+  the named negotiation, SDK callback, downgrade, pin and outcome-method witnesses must pass.
   Skipped/todo/missing required cases fail; an unsupported runtime fails rather
   than reporting a skipped success.
 

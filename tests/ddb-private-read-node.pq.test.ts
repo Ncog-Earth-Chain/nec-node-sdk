@@ -66,6 +66,19 @@ test('real hybrid connection authenticates before sending and uses one socket', 
   await expect(channel.send('ddb_signedSelect', [])).rejects.toThrow('already consumed');
 });
 
+test('private transaction outcome uses the exact authenticated hybrid socket without widening mutation access', async () => {
+  const f = await fixture('X25519MLKEM768', { jsonrpc: '2.0', id: 1, result: { state: 'pending' } });
+  const channel = await connectDdbNodePrivateRead(f.connection, f.trusted, { ca: cert });
+  const params = [{ procedure: '@ddb/private-txn-outcome/v1', args: [hash, '0x' + '00'.repeat(32), '1', 'result'] }];
+  await expect(channel.send('ddb_getPrivateTransactionOutcome', params)).resolves.toEqual({ state: 'pending' });
+  expect(JSON.parse(f.bodies[0])).toEqual({ jsonrpc: '2.0', id: 1, method: 'ddb_getPrivateTransactionOutcome', params });
+  expect(f.sockets.size).toBe(1);
+  await expect(channel.send('ddb_getPrivateTransactionOutcome', params)).rejects.toThrow('already consumed');
+  const denied = await connectDdbNodePrivateRead(f.connection, f.trusted, { ca: cert });
+  await expect(denied.send('ddb_putPayloadBatch', params)).rejects.toThrow('signed read');
+  expect(f.bodies).toHaveLength(1);
+});
+
 test.each(['X25519MLKEM768', 'X25519'])('actual Ddb private-read callback uses connector and refuses downgrade: %s', async curve => {
   const f = await fixture(curve);
   const ingress = jest.fn(async (method: string) => {
