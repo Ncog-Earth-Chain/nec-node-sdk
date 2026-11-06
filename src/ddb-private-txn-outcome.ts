@@ -13,6 +13,7 @@ import {
   type DdbAuthenticatedReadTransport,
 } from './ddb-private-read';
 import type { HostEndpointsJSON } from './ddb-resolve';
+import { ownPrivateCustodyBinding, type DdbPrivateCustodyBinding, type DdbPrivateCustodyPolicy, type DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
 import { MLDSA87_PUBKEY_BYTES, MLDSA87_SIG_BYTES } from './key-registry';
 
 const SELECTOR = '@ddb/private-txn-outcome/v1';
@@ -95,6 +96,8 @@ export interface DdbPrivateTxnExpectation {
 }
 
 export interface DdbPrivateTxnCollectionInput extends Omit<DdbPrivateTxnOutcomeReadInput, 'validatorId' | 'mode'> {
+  /** Optional original-host retry channel. No fallback to current placement after a custody refusal. */
+  custodyPolicy?: DdbPrivateCustodyPolicy;
   /** Exact offline builder output retained locally before submission. Salts/payloads never leave this client here. */
   retained: BuiltDdbPrivateTransaction;
   /** COMPLETE original placement, not the live/current reachable subset. Shape validation is not authentication. */
@@ -206,40 +209,52 @@ function activeRoute(contract: string, value: unknown): DdbCurrentReadRoute {
   return route;
 }
 
-function closeTransport(transport: DdbAuthenticatedReadTransport | undefined): void {
+function closeTransport(transport: DdbAuthenticatedReadTransport | DdbAuthenticatedCustodyTransport | undefined): void {
   const close = (transport as { close?: () => void } | undefined)?.close;
   if (typeof close === 'function') { try { close.call(transport); } catch { /* Best-effort release; never replace a safe result with endpoint text. */ } }
 }
 
-async function readCaptured(input: DdbPrivateTxnOutcomeReadInput, historicalAddress?: string): Promise<DdbPrivateTxnLocalOutcome> {
-  let transport: DdbAuthenticatedReadTransport | undefined;
+async function readCaptured(input: DdbPrivateTxnOutcomeReadInput, historicalAddress?: string, custody?: DdbPrivateCustodyPolicy): Promise<DdbPrivateTxnLocalOutcome> {
+  let transport: DdbAuthenticatedReadTransport | DdbAuthenticatedCustodyTransport | undefined;
+  let custodyBinding: DdbPrivateCustodyBinding | undefined;
   try {
-    const contract = '0x' + input.database.slice(2);
-    const route = activeRoute(contract, await input.resolver.resolveCurrent(contract));
-    if (await input.policy.verifyAssignment(route) !== true) return fail('current assignment is not trusted');
-    const member = route.members.find(m => m.validatorId === input.validatorId);
-    if (!member || (historicalAddress !== undefined && member.address !== historicalAddress)) return fail('required recipient is not currently assigned');
-    const hosts = await input.resolver.hostEndpoints([member.validatorId]);
-    if (!Array.isArray(hosts) || hosts.length > 64) return fail('invalid endpoint discovery');
-    const matching = hosts.filter(h => h?.validatorId === member.validatorId && h.live === true);
-    // EndpointDirectory's existing MAX_ENDPOINTS is four; this is not a new placement policy.
-    if (matching.length !== 1 || !Array.isArray(matching[0].endpoints) || matching[0].endpoints.length < 1 || matching[0].endpoints.length > 4) {
-      return fail('required recipient endpoint unavailable');
+    if (custody) {
+      const channel = await custody.connect(input.validatorId);
+      transport = channel;
+      const binding = ownPrivateCustodyBinding(channel?.binding);
+      custodyBinding = binding;
+      if (binding.chain !== input.chain || binding.validatorId !== input.validatorId || channel.endpointAuthenticated !== true ||
+        channel.confidentiality !== 'post-quantum' || typeof channel.send !== 'function' || typeof channel.close !== 'function') {
+        return fail('custody transport is not authenticated and bound to the original recipient');
+      }
+    } else {
+      const contract = '0x' + input.database.slice(2);
+      const route = activeRoute(contract, await input.resolver.resolveCurrent(contract));
+      if (await input.policy.verifyAssignment(route) !== true) return fail('current assignment is not trusted');
+      const member = route.members.find(m => m.validatorId === input.validatorId);
+      if (!member || (historicalAddress !== undefined && member.address !== historicalAddress)) return fail('required recipient is not currently assigned');
+      const hosts = await input.resolver.hostEndpoints([member.validatorId]);
+      if (!Array.isArray(hosts) || hosts.length > 64) return fail('invalid endpoint discovery');
+      const matching = hosts.filter(h => h?.validatorId === member.validatorId && h.live === true);
+      // EndpointDirectory's existing MAX_ENDPOINTS is four; this is not a new placement policy.
+      if (matching.length !== 1 || !Array.isArray(matching[0].endpoints) || matching[0].endpoints.length < 1 || matching[0].endpoints.length > 4) {
+        return fail('required recipient endpoint unavailable');
+      }
+      const endpoints = Object.freeze(matching[0].endpoints.map(e => {
+        if (!e || typeof e.scheme !== 'string' || !e.scheme || typeof e.url !== 'string' || !e.url) return fail('invalid endpoint');
+        return Object.freeze({ scheme: e.scheme, url: e.url, tlsKeyHash: fixedHex(e.tlsKeyHash, 32, true) });
+      }));
+      transport = await input.policy.connect(Object.freeze({ route, member, endpoints }));
+      let bound = false;
+      try {
+        const b = transport?.binding;
+        bound = !!b && transport.endpointAuthenticated === true && transport.confidentiality === 'post-quantum' &&
+          typeof transport.send === 'function' && b.validatorId === member.validatorId && fixedHex(b.address, 20, true) === member.address &&
+          endpoints.some(e => e.url === b.url && e.tlsKeyHash === fixedHex(b.tlsKeyHash, 32, true)) &&
+          JSON.stringify(parseDdbCurrentReadRoute(contract, b.route)) === JSON.stringify(route);
+      } catch { /* Unverifiable channel binding is a refusal, never a generic provider fallback. */ }
+      if (!bound) return fail('transport is not authenticated and bound to the addressed assignment/endpoint');
     }
-    const endpoints = Object.freeze(matching[0].endpoints.map(e => {
-      if (!e || typeof e.scheme !== 'string' || !e.scheme || typeof e.url !== 'string' || !e.url) return fail('invalid endpoint');
-      return Object.freeze({ scheme: e.scheme, url: e.url, tlsKeyHash: fixedHex(e.tlsKeyHash, 32, true) });
-    }));
-    transport = await input.policy.connect(Object.freeze({ route, member, endpoints }));
-    let bound = false;
-    try {
-      const b = transport?.binding;
-      bound = !!b && transport.endpointAuthenticated === true && transport.confidentiality === 'post-quantum' &&
-        typeof transport.send === 'function' && b.validatorId === member.validatorId && fixedHex(b.address, 20, true) === member.address &&
-        endpoints.some(e => e.url === b.url && e.tlsKeyHash === fixedHex(b.tlsKeyHash, 32, true)) &&
-        JSON.stringify(parseDdbCurrentReadRoute(contract, b.route)) === JSON.stringify(route);
-    } catch { /* Unverifiable channel binding is a refusal, never a generic provider fallback. */ }
-    if (!bound) return fail('transport is not authenticated and bound to the addressed assignment/endpoint');
     const send = transport.send.bind(transport);
     const address = await input.signer.getAddress();
     if (typeof address !== 'string' || address.toLowerCase() !== input.caller) return fail('signer differs from expected caller');
@@ -249,6 +264,7 @@ async function readCaptured(input: DdbPrivateTxnOutcomeReadInput, historicalAddr
       [input.txnId, input.expectedCommitTx ?? ZERO_HASH, String(input.validatorId), input.mode], input.caller, key.slice());
     const signature = await input.signer.signDdbHash(prepared.hash.slice());
     if (!(signature instanceof Uint8Array) || signature.length !== MLDSA87_SIG_BYTES) return fail('invalid read signature');
+    if (custodyBinding) ownPrivateCustodyBinding(custodyBinding);
     return parseObservation(await send('ddb_getPrivateTransactionOutcome', [{ ...prepared.envelope, callerSig: hex(signature) }]), input);
   } catch (error) {
     // Do not forward endpoint/signer errors, which may contain SQL, request or result material.
@@ -389,6 +405,8 @@ export async function collectDdbPrivateTransactionOutcome(input: DdbPrivateTxnCo
   const requiredHosts = Array.from(input.requiredHosts, recipient);
   if (requiredHosts.some((id, i) => i > 0 && id <= requiredHosts[i - 1])) return fail('required hosts must be unique and sorted');
   const read = snapshotRead({ ...input, validatorId: requiredHosts[0], mode: 'result' });
+  if (input.custodyPolicy !== undefined && typeof input.custodyPolicy?.connect !== 'function') return fail('invalid custody policy');
+  const custody = input.custodyPolicy === undefined ? undefined : { connect: input.custodyPolicy.connect.bind(input.custodyPolicy) };
   const retained = validatePrivateTransactionRecord(read, input.retained);
   const placement = activeRoute('0x' + read.database.slice(2), input.completePlacement);
   const b = retained.base;
@@ -408,7 +426,7 @@ export async function collectDdbPrivateTransactionOutcome(input: DdbPrivateTxnCo
   const durable: DdbPrivateTxnLocalDurable[] = [];
   for (const validatorId of requiredHosts) {
     try {
-      const local = await readCaptured({ ...read, validatorId }, placement.members.find(m => m.validatorId === validatorId)!.address);
+      const local = await readCaptured({ ...read, validatorId }, placement.members.find(m => m.validatorId === validatorId)!.address, custody);
       if (local.state === 'pending') { hosts.push({ validatorId, state: 'pending' }); continue; }
       if (!local.payloads || local.payloads.length !== retained.payloads.length || local.payloads.some((p, i) => hex(p) !== retained.payloads[i])) {
         hosts.push({ validatorId, state: 'unavailable' }); continue;

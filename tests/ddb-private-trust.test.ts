@@ -40,6 +40,34 @@ export function trustFixture() {
 
 beforeEach(() => open.mockReset());
 
+test('custody trusts current stable-ID endpoint from the pinned source without current membership', async () => {
+  const f = trustFixture();
+  const endpoint = { directory: f.assignment.endpointDirectory, block: 40, blockTime: 1800000000,
+    hosts: [{ validatorId: 77, live: true, status: 'live', auth: '0x' + 'ef'.repeat(20), expiry: 4102444800,
+      endpoints: [{ scheme: 'https', url: 'https://rotated77.example', tlsKeyHash: hash('ee') }] }] };
+  f.sourceSend.mockImplementation(async method => method === 'eth_chainId' ? '0xa0a' : endpoint);
+  const channel = await (f.trust as any).custodyPolicy.connect(77);
+  expect(channel.binding.validatorId).toBe(77);
+  expect(channel.binding.auth).toBe(endpoint.hosts[0].auth);
+  expect(channel.binding).not.toHaveProperty('route');
+  expect(f.sourceSend.mock.calls).toEqual([['eth_chainId', []], ['ddb_hostEndpoints', [[77]]]]);
+  expect(open.mock.calls[2].slice(0, 3)).toEqual(['https://rotated77.example', hash('ee'), ['ddb_getPrivateTransactionOutcome']]);
+  expect(f.signDdbHash).not.toHaveBeenCalled();
+  channel.close();
+});
+
+test.each(['chain', 'id', 'expired', 'pin', 'status'])('custody source refuses bad current evidence before host connect: %s', async fault => {
+  const f = trustFixture();
+  const endpoint = { directory: f.assignment.endpointDirectory, block: 40, blockTime: 1800000000,
+    hosts: [{ validatorId: fault === 'id' ? 78 : 77, live: true, status: fault === 'status' ? 'not published' : 'live',
+      auth: '0x' + 'ef'.repeat(20), expiry: fault === 'expired' ? 1800000000 : 4102444800,
+      endpoints: [{ scheme: 'https', url: 'https://rotated77.example', tlsKeyHash: hash(fault === 'pin' ? '00' : 'ee') }] }] };
+  f.sourceSend.mockImplementation(async method => method === 'eth_chainId' ? (fault === 'chain' ? '0x1' : '0xa0a') : endpoint);
+  await expect((f.trust as any).custodyPolicy.connect(77)).rejects.toThrow();
+  expect(open.mock.calls.every(c => c[0] === f.source.url)).toBe(true);
+  expect(f.signDdbHash).not.toHaveBeenCalled();
+});
+
 test('endpoint runtime pin is the hash of the reviewed node bytecode vector', () => {
   expect(hex(keccak_256(Buffer.from(runtimeVector.runtimeHex.slice(2), 'hex')))).toBe(ENDPOINT_DIRECTORY_RUNTIME_CODE_HASH);
   expect(runtimeVector.runtimeCodeHash).toBe(ENDPOINT_DIRECTORY_RUNTIME_CODE_HASH);
@@ -191,7 +219,13 @@ test('persisted reference workflow commits only through the independent source a
       initialAnchor: f.base.initial_anchor, finalAnchor: hash('82'), memberCount: '0x2' };
     const evidence = { ...observed, readVersion: '0x1b', operationHashes: record.retained.members.map(m => hex(m.hash)),
       payloadCommitments: record.retained.members.map(m => decodeDdbCommitmentEnvelope(Buffer.from(m.envelope.data.slice(2), 'hex').toString()).commitment), transaction };
-    f.sourceSend.mockImplementation(async method => method === 'ddb_getPrivateAssignmentEvidence' ? f.assignment : evidence);
+    f.sourceSend.mockImplementation(async (method, params) => {
+      if (method === 'eth_chainId') return '0xa0a';
+      if (method === 'ddb_hostEndpoints') return { directory: f.assignment.endpointDirectory, block: 40, blockTime: 1800000000,
+        hosts: f.assignment.hosts.filter(h => params[0].includes(h.validatorId)).map(h => ({ validatorId: h.validatorId,
+          auth: h.auth, live: h.live, status: 'live', expiry: 4102444800, endpoints: h.endpoints })) };
+      return method === 'ddb_getPrivateAssignmentEvidence' ? f.assignment : evidence;
+    });
     const oldSend = f.send.getMockImplementation()!;
     f.send.mockImplementation(async (method, params) => method === 'ddb_getPrivateTransactionOutcome'
       ? { ...observed, state: 'local_durable', validatorId: Number(params[0].args[2]), payloads: record.retained.sidecars.map(s => s.payload) }

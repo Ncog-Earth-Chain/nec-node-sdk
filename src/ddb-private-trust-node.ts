@@ -1,11 +1,13 @@
 import { openPrivateNodeChannel } from './ddb-private-channel-node';
+import { connectDdbNodePrivateCustody } from './ddb-private-custody-node';
 import { connectDdbNodePrivateRead, type DdbNodePrivateReadTransportOptions } from './ddb-private-read-node';
 import { createDdbTrustedPrivatePolicy, type DdbTrustedPrivateOptions } from './ddb-private-trust';
 import type { DdbSigner } from './ddb';
 import { evidenceObject as obj, evidenceFixed as fixed, evidenceRecipient, evidenceOrigin, ownPrivateAuthority,
   type DdbPrivateAuthority, type DdbPrivateEvidenceSource } from './ddb-private-evidence';
 
-const METHODS = Object.freeze(['ddb_getPrivateAssignmentEvidence', 'ddb_getPrivateTransactionSnapshotEvidence', 'ddb_getPrivateTransactionFinalityEvidence']);
+const METHODS = Object.freeze(['ddb_getPrivateAssignmentEvidence', 'ddb_getPrivateTransactionSnapshotEvidence', 'ddb_getPrivateTransactionFinalityEvidence',
+  'eth_chainId', 'ddb_hostEndpoints']);
 
 /** Authenticate the explicitly configured source directly. No route discovery or policy recursion. */
 export async function connectDdbNodePrivateEvidence(source: DdbPrivateEvidenceSource, options: DdbNodePrivateReadTransportOptions = {}) {
@@ -35,6 +37,7 @@ export function ddbNodePrivateOptions(input: DdbTrustedNodePrivateOptions): DdbT
       return Object.freeze({ ...channel, send: (method: string, params: readonly unknown[]) => channel.send(method, Array.from(params)) });
     },
     connectHost: (connection, trusted) => connectDdbNodePrivateRead(connection, trusted, hostTls),
+    connectCustodyHost: trusted => connectDdbNodePrivateCustody(trusted, hostTls),
   };
 }
 

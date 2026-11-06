@@ -6,6 +6,7 @@ import { join } from 'path';
 import { AddressInfo, Socket } from 'net';
 import { keccak_256 } from '@noble/hashes/sha3';
 import { connectDdbNodePrivateRead } from '../src/ddb-private-read-node';
+import { connectDdbNodePrivateCustody } from '../src/ddb-private-custody-node';
 import { parseDdbCurrentReadRoute, type DdbPrivateReadConnection } from '../src/ddb-private-read';
 import { Ddb, buildDdbSignedReadProcedure, type DdbSigner } from '../src/ddb';
 import { encodePrivateTxnBaseV1, encodePrivateTxnIntentV1 } from '../src/ddb-private-txn';
@@ -68,6 +69,51 @@ test('real hybrid connection authenticates before sending and uses one socket', 
   expect(JSON.parse(f.bodies[0])).toEqual({ jsonrpc: '2.0', id: 1, method: 'ddb_signedSelect', params: [{ secret: 'tenant-private-query' }] });
   expect(f.sockets.size).toBe(1);
   await expect(channel.send('ddb_signedSelect', [])).rejects.toThrow('already consumed');
+});
+
+function custodyBinding(url: string, tlsKeyHash = pin) {
+  return { chain: fixtureChain, validatorId: 77, auth: address, directory: address, block: 40, blockTime: 1800000000,
+    expiry: 4102444800, source: { validatorId: 9, address, url: 'https://source.example', tlsKeyHash: pin }, url, tlsKeyHash };
+}
+test('custody channel uses actual hybrid TLS and only one original-host outcome RPC', async () => {
+  const f = await fixture();
+  const channel = await connectDdbNodePrivateCustody(custodyBinding(f.trusted.url), { ca: cert });
+  expect(channel.negotiatedGroup).toBe('X25519MLKEM768');
+  expect(channel.binding.validatorId).toBe(77);
+  expect(channel.binding).not.toHaveProperty('route');
+  expect(f.bodies).toHaveLength(0);
+  await channel.send('ddb_getPrivateTransactionOutcome', [{ procedure: '@ddb/private-txn-outcome/v1' }]);
+  expect(f.bodies).toHaveLength(1); expect(f.sockets.size).toBe(1);
+  await expect(channel.send('ddb_getPrivateTransactionOutcome', [])).rejects.toThrow('already consumed');
+  const denied = await connectDdbNodePrivateCustody(custodyBinding(f.trusted.url), { ca: cert });
+  await expect(denied.send('ddb_signedSelect', [])).rejects.toThrow('private transport');
+  expect(f.bodies).toHaveLength(1);
+});
+test.each(['pin', 'classical', 'ca', 'hostname'])('custody channel refuses before plaintext: %s', async fault => {
+  const f = await fixture(fault === 'classical' ? 'X25519' : 'X25519MLKEM768');
+  const url = fault === 'hostname' ? f.trusted.url.replace('127.0.0.1', 'localhost') : f.trusted.url;
+  await expect(connectDdbNodePrivateCustody(custodyBinding(url, fault === 'pin' ? hash : pin),
+    { ca: fault === 'ca' ? undefined : cert, timeoutMs: 1000 })).rejects.toThrow();
+  expect(f.bodies).toHaveLength(0);
+});
+test('custody lease expiration while waiting to sign prevents plaintext on the open socket', async () => {
+  const f = await fixture();
+  const channel = await connectDdbNodePrivateCustody(custodyBinding(f.trusted.url), { ca: cert });
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(4102444800000);
+  try {
+    await expect(channel.send('ddb_getPrivateTransactionOutcome', [{ secret: 'private' }])).rejects.toThrow();
+    expect(f.bodies).toHaveLength(0);
+  } finally { clock.mockRestore(); channel.close(); }
+});
+test('custody channel refuses redirects and bounded response overflow', async () => {
+  const redirect = await fixture('X25519MLKEM768', {}, 302);
+  const a = await connectDdbNodePrivateCustody(custodyBinding(redirect.trusted.url), { ca: cert });
+  await expect(a.send('ddb_getPrivateTransactionOutcome', [])).rejects.toThrow('HTTP status 302');
+  expect(redirect.bodies).toHaveLength(1);
+  const large = await fixture('X25519MLKEM768', { jsonrpc: '2.0', id: 1, result: 'x'.repeat(1024) });
+  const b = await connectDdbNodePrivateCustody(custodyBinding(large.trusted.url), { ca: cert, maxResponseBytes: 100 });
+  await expect(b.send('ddb_getPrivateTransactionOutcome', [])).rejects.toThrow('byte limit');
+  expect(large.bodies).toHaveLength(1);
 });
 
 test.each(['ddb_getPrivateAssignmentEvidence', 'ddb_getPrivateTransactionSnapshotEvidence', 'ddb_getPrivateTransactionFinalityEvidence'])
