@@ -6,7 +6,7 @@ import {
   type DdbCanonicalOpV2, type DdbPreparedTxn, type DdbTxnRead, type DdbTxnHeaderEnvelope,
 } from './ddb';
 import { ddbPayloadCommitment, encodeDdbCommitmentEnvelope, DDB_COMMITMENT_PAYLOAD_MAX_BYTES, type DdbPayloadSidecar, type DdbTagDelta } from './ddb-commitment';
-import { PLACEMENT_MANAGER_RUNTIME_CODE_HASH } from './ddb-proof';
+import { isSupportedPlacementManagerRuntime } from './ddb-proof';
 
 // Canonical grammar shared by private DB-01 preparation and authenticated evidence.
 // This closed grammar does not replace the existing single-operation payload.
@@ -848,7 +848,7 @@ function validateMember(m: PrivateTxnMemberV1, maxMembers: number): void {
   const b = m.base;
   if (zero(b.contract) || zero(b.caller) || b.database !== 'c_' + b.contract.slice(2)) fail('invalid database identity');
   if (zero(b.chain) || zero(b.block_hash) || zero(b.state_root)) fail('incomplete completed-block identity');
-  if (zero(b.manager) || b.manager_runtime !== PLACEMENT_MANAGER_RUNTIME_CODE_HASH || b.placement_version === BigInt(0) || zero(b.group_hash) || b.digest_version === BigInt(0) || zero(b.digest_fingerprint)) fail('incomplete placement or digest identity');
+  if (zero(b.manager) || !isSupportedPlacementManagerRuntime(b.manager_runtime) || b.placement_version === BigInt(0) || zero(b.group_hash) || b.digest_version === BigInt(0) || zero(b.digest_fingerprint)) fail('incomplete placement or digest identity');
   if (![BigInt(4), BigInt(5), BigInt(6), BigInt(7)].includes(m.intent.type)) fail('intent is not a data operation');
   validateContext(b.context);
   for (const side of [m.effect.removed, m.effect.added]) {

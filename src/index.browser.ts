@@ -48,6 +48,7 @@ export {
 } from './ddb-private-read';
 export {
   verifyRegistryProof, verifyPlacementProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_RUNTIME_CODE_HASH,
+  PLACEMENT_MANAGER_V2_RUNTIME_CODE_HASH, isSupportedPlacementManagerRuntime,
   type RegistryProofJSON, type PlacementRecordJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
 } from './ddb-proof';
 export {

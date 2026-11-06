@@ -1,7 +1,7 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import { keccak_256 } from '@noble/hashes/sha3';
 import { parseDdbCurrentReadRoute, type DdbCurrentReadRoute } from './ddb-private-read';
-import { PLACEMENT_MANAGER_RUNTIME_CODE_HASH } from './ddb-proof';
+import { isSupportedPlacementManagerRuntime } from './ddb-proof';
 import { DDB_COMMITMENT_PAYLOAD_MAX_BYTES } from './ddb-commitment';
 import { MLDSA87_PUBKEY_BYTES } from './key-registry';
 import type { DdbPrivateTxnFinalityCandidate } from './ddb-private-txn-outcome';
@@ -75,7 +75,7 @@ export function evidenceRoute(database: string, value: unknown): DdbCurrentReadR
   if (!Array.isArray(r.members) || r.members.length < 1 || r.members.length > 64) return evidenceFail();
   Array.from(r.members, m => { const member = evidenceObject(m, ['validatorId', 'address']); evidenceRecipient(member.validatorId); evidenceFixed(member.address, 20); });
   const route = parseDdbCurrentReadRoute('0x' + database.slice(2), value);
-  if (!route.private || !route.enabled || route.database !== database || route.runtimeHash !== PLACEMENT_MANAGER_RUNTIME_CODE_HASH) return evidenceFail();
+  if (!route.private || !route.enabled || route.database !== database || !isSupportedPlacementManagerRuntime(route.runtimeHash)) return evidenceFail();
   return route;
 }
 export function samePrivateRoute(a: DdbCurrentReadRoute, b: DdbCurrentReadRoute): boolean { return JSON.stringify(a) === JSON.stringify(b); }
