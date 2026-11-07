@@ -6,6 +6,16 @@ explicit `requiredHosts`. Every required original validator must return its own
 native durable result; an imported copy on a replacement host cannot satisfy
 that obligation. An unavailable original host leaves the collection pending.
 
+The pinned evidence source must also support retained assignment/finality reads
+after it leaves the current storage group. That node capability preserves current
+caller-key and canonical permission checks while keeping snapshot preparation
+limited to current hosts. A node with current-membership-only evidence admission
+returns `historical_placement_unverified` before the collector reaches custody.
+Changing the persisted source to bypass this refusal is rejected: retry authority
+equality, historical placement verification and original required hosts remain
+mandatory. Source-node support and its authorization checks are a separate node
+prerequisite; the SDK does not infer permission from old membership.
+
 `createDdbPrivateReferenceClient` supplies this path through
 `createDdbTrustedNodePrivatePolicy`. It authenticates the configured source by
 certificate, hostname and SPKI pin, checks the existing `eth_chainId`, then reads
