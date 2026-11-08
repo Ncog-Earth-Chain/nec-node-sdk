@@ -80,11 +80,14 @@ async function persistedMove(run: (fixture: MoveFixture) => Promise<void>) {
   async function start() {
     const key = createSecretKey(randomBytes(32));
     const storeOptions = { directory, key: async () => key, sync: 'file' as const };
-    await createDdbNodePrivateRetryStore(storeOptions).create(f.state);
+    const writer = createDdbNodePrivateRetryStore(storeOptions);
+    await writer.create({ ...f.state, phase: 'prepared', commitTxHash: null });
+    await writer.beginSubmission(f.state.record.retained.id);
+    await writer.recordSubmission(f.state.record.retained.id, f.finality.commitTx);
     // Reopen the real encrypted retry store. The current source identity remains
     // the exact authority persisted before the group replacement.
     const store = createDdbNodePrivateRetryStore(storeOptions);
-    expect((await store.load(f.state.record.retained.id)).authority).toEqual(f.authority);
+    expect(await store.load(f.state.record.retained.id)).toEqual(f.state);
     const missingHosts = new Set<number>();
     const sourceSend = jest.fn(async (method: string, params: any[]): Promise<any> => {
       if (method === 'eth_chainId') return '0x' + BigInt(f.authority.chain).toString(16);
