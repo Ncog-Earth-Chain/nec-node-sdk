@@ -94,6 +94,56 @@ function fixture() {
     resolveCurrent, hostEndpoints, verifyAssignment, connect, signDdbHash, verifyHistoricalPlacement, verifyFinality };
 }
 
+describe('retained original-host custody collection', () => {
+  function custodyFixture() {
+    const f = fixture();
+    f.resolveCurrent.mockResolvedValue(route([20, 21, 22], '0x3'));
+    const connect = jest.fn(async (validatorId: number): Promise<any> => ({
+      endpointAuthenticated: true, confidentiality: 'post-quantum', close: f.close,
+      binding: { chain, validatorId, auth: address('ef'), directory: address('dd'), block: 40, blockTime: 1800000000,
+        expiry: 4102444800, source: { validatorId: 99, address: address('ab'), url: 'https://source.example', tlsKeyHash: hash('cd') },
+        url: `https://rotated${validatorId}.example`, tlsKeyHash: hash('ee') },
+      send: (method: string, params: any[]) => f.send(validatorId, method, params),
+    }));
+    return { ...f, custody: connect, input: { ...f.collect, custodyPolicy: { connect } } };
+  }
+  test('retained custody uses every original ID after move and current publisher rotation', async () => {
+    const f = custodyFixture();
+    const result = await collectDdbPrivateTransactionOutcome(f.input);
+    expect(result.state).toBe('committed');
+    expect(result.requiredHosts).toEqual([2, 7]);
+    expect(f.custody.mock.calls.map(c => c[0])).toEqual([2, 7]);
+    expect(f.resolveCurrent).not.toHaveBeenCalled();
+    expect(f.connect).not.toHaveBeenCalled();
+    expect(f.sends.map(s => s.params[0].args[2])).toEqual(['2', '7']);
+  });
+  test('retained custody missing original host stays pending without substituting imported host', async () => {
+    const f = custodyFixture();
+    f.responses.set(7, new Error('native outcome unavailable'));
+    const result = await collectDdbPrivateTransactionOutcome(f.input);
+    expect(result.state).toBe('pending');
+    if (result.committed) throw new Error('unexpected commit');
+    expect(result.hosts).toEqual([{ validatorId: 2, state: 'local_durable' }, { validatorId: 7, state: 'unavailable' }]);
+    expect(result.requiredHosts).toEqual([2, 7]);
+  });
+  test.each(['id', 'chain', 'expired', 'confidentiality'])('retained custody refuses a transport bound to different authority: %s', async fault => {
+    const f = custodyFixture();
+    const connect = f.custody.getMockImplementation()!;
+    f.custody.mockImplementation(async id => {
+      const channel = await connect(id);
+      if (fault === 'id') channel.binding.validatorId = 20;
+      if (fault === 'chain') channel.binding.chain = hash('ef');
+      if (fault === 'expired') channel.binding.expiry = 1800000000;
+      if (fault === 'confidentiality') channel.confidentiality = 'classical';
+      return channel;
+    });
+    const result = await collectDdbPrivateTransactionOutcome(f.input);
+    expect(result.committed).toBe(false);
+    expect(f.signDdbHash).not.toHaveBeenCalled();
+    expect(f.connect).not.toHaveBeenCalled();
+  });
+});
+
 describe('addressed private transaction outcome reads', () => {
   test('signs exact unchanged READPROC for one recipient and preserves canonical results', async () => {
     const f = fixture();

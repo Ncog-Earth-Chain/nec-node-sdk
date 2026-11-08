@@ -91,7 +91,7 @@ export function createDdbPrivateClient(input: DdbPrivateClientOptions) {
     async collect(txnId: string) {
       try {
         const state = await load(txnId);
-        const outcome = await collectDdbPrivateTransactionOutcome({ signer, resolver, policy: trust.policy, chain: authority.chain,
+        const outcome = await collectDdbPrivateTransactionOutcome({ signer, resolver, policy: trust.policy, custodyPolicy: trust.custodyPolicy, chain: authority.chain,
           database: authority.database, caller: authority.caller, txnId: state.record.retained.id, expectedCommitTx: state.commitTxHash,
           maxMembers: state.record.maxMembers, retained: state.record.retained, completePlacement: state.record.completePlacement,
           requiredHosts: state.policy.requiredHosts, verifyHistoricalPlacement: trust.verifyHistoricalPlacement, verifyFinality: trust.verifyFinality });

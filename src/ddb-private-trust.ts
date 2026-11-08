@@ -3,6 +3,8 @@ import { parseDdbCurrentReadRoute, type DdbPrivateReadPolicy, type DdbCurrentRea
 import { decodePrivateTxnBaseV1, encodePrivateTxnBaseV1, encodePrivateTxnIntentV1, type PrivateTxnBaseV1 } from './ddb-private-txn';
 import type { DdbPrivatePreparedSnapshotRequest } from './ddb-private-txn-online';
 import type { DdbPrivateTxnExpectation, DdbPrivateTxnFinalityCandidate } from './ddb-private-txn-outcome';
+import { parsePrivateCustodyEndpoint, ownPrivateCustodyBinding, type DdbPrivateCustodyBinding,
+  type DdbPrivateCustodyPolicy, type DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
 import { MLDSA87_PUBKEY_BYTES, MLDSA87_SIG_BYTES } from './key-registry';
 import { DDB_COMMITMENT_PAYLOAD_MAX_BYTES } from './ddb-commitment';
 import { evidenceHex as hex, evidenceFail as fail, evidenceObject as obj, evidenceFixed as fixed, evidenceBytes as bytes,
@@ -27,6 +29,8 @@ export interface DdbTrustedPrivateOptions extends DdbPrivateAuthority {
   connectEvidence(source: DdbPrivateEvidenceSource): Promise<DdbPrivateEvidenceChannel>;
   /** Authenticate the independently observed full binding on the channel used by send. */
   connectHost(connection: DdbPrivateReadConnection, independentlyTrustedBinding: DdbTrustedReadEndpoint): Promise<DdbPrivateHostChannel>;
+  /** Optional concrete retained-outcome channel; generic browser/mobile callers must supply one explicitly. */
+  connectCustodyHost?(independentlyTrustedBinding: DdbPrivateCustodyBinding): Promise<DdbAuthenticatedCustodyTransport>;
 }
 function matchesBase(route: DdbCurrentReadRoute, base: PrivateTxnBaseV1): boolean {
   return route.database === base.database && route.contract === base.contract && route.block === '0x' + base.block.toString(16) &&
@@ -49,6 +53,8 @@ export function createDdbTrustedPrivatePolicy(input: DdbTrustedPrivateOptions) {
   const authority = ownPrivateAuthority(input);
   if (typeof input.connectEvidence !== 'function' || typeof input.connectHost !== 'function') return fail();
   const connectEvidence = input.connectEvidence.bind(input), connectHost = input.connectHost.bind(input);
+  if (input.connectCustodyHost !== undefined && typeof input.connectCustodyHost !== 'function') return fail();
+  const connectCustodyHost = input.connectCustodyHost?.bind(input);
   const signer = input.signer;
   if (!signer || typeof signer.getAddress !== 'function' || typeof signer.getPublicKey !== 'function' || typeof signer.signDdbHash !== 'function') return fail();
   const getAddress = signer.getAddress.bind(signer), getPublicKey = signer.getPublicKey.bind(signer), sign = signer.signDdbHash.bind(signer);
@@ -75,6 +81,36 @@ export function createDdbTrustedPrivatePolicy(input: DdbTrustedPrivateOptions) {
     } catch { return fail(); } finally { try { close?.(); } catch { /* No adapter text disclosure. */ } }
   }
   const assignment = async (at: 'current' | string) => parsePrivateAssignment(await read(0, [at]), authority, at);
+  async function readPublic(method: 'eth_chainId' | 'ddb_hostEndpoints', params: readonly unknown[]): Promise<unknown> {
+    let channel: DdbPrivateEvidenceChannel | undefined;
+    try {
+      channel = await connectEvidence(authority.source);
+      const binding = obj(channel?.binding, ['validatorId', 'address', 'url', 'tlsKeyHash']);
+      if (binding.validatorId !== authority.source.validatorId || binding.address !== authority.source.address ||
+        binding.url !== authority.source.url || binding.tlsKeyHash !== authority.source.tlsKeyHash ||
+        typeof channel.send !== 'function' || typeof channel.close !== 'function') return fail();
+      const result = await channel.send(method, params);
+      const encoded = JSON.stringify(result);
+      if (typeof encoded !== 'string' || new TextEncoder().encode(encoded).byteLength > 65536) return fail();
+      return result;
+    } catch { return fail(); } finally { try { channel?.close(); } catch { /* No adapter text disclosure. */ } }
+  }
+  const custodyPolicy: DdbPrivateCustodyPolicy | undefined = connectCustodyHost ? Object.freeze({
+    async connect(inputID: number): Promise<DdbAuthenticatedCustodyTransport> {
+      let channel: DdbAuthenticatedCustodyTransport | undefined;
+      try {
+        const validatorId = evidenceRecipient(inputID);
+        const chain = await readPublic('eth_chainId', []);
+        if (typeof chain !== 'string' || !/^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/.test(chain) || BigInt(chain) !== BigInt(authority.chain)) return fail();
+        const trusted = parsePrivateCustodyEndpoint(await readPublic('ddb_hostEndpoints', [[validatorId]]), authority.chain, validatorId, authority.source);
+        channel = await connectCustodyHost(trusted);
+        const binding = ownPrivateCustodyBinding(channel?.binding);
+        if (JSON.stringify(binding) !== JSON.stringify(trusted) || channel.endpointAuthenticated !== true ||
+          channel.confidentiality !== 'post-quantum' || typeof channel.send !== 'function' || typeof channel.close !== 'function') return fail();
+        return Object.freeze({ ...channel, binding, send: channel.send.bind(channel), close: channel.close.bind(channel) });
+      } catch { try { channel?.close(); } catch { /* No adapter text disclosure. */ } return fail(); }
+    },
+  }) : undefined;
   const policy: DdbPrivateReadPolicy = {
     async verifyAssignment(value) {
       try {
@@ -155,6 +191,6 @@ export function createDdbTrustedPrivatePolicy(input: DdbTrustedPrivateOptions) {
       return true;
     } catch { return false; }
   }
-  return Object.freeze({ trust: 'trusted-validating-node' as const, authority, policy: Object.freeze(policy),
+  return Object.freeze({ trust: 'trusted-validating-node' as const, authority, policy: Object.freeze(policy), custodyPolicy,
     readCurrentAssignment: () => assignment('current'), acceptPreparedSnapshot, verifyHistoricalPlacement, verifyFinality });
 }
