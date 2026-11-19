@@ -7,6 +7,7 @@ import {
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndpointsJSON } from './ddb-resolve';
 import { sendDdbPrivateRead, validateDdbPrivateReadOptions, type DdbPrivateReadOptions, type DdbCurrentReadRoute } from './ddb-private-read';
+import { buildDdbPrivateCapabilityToken, ddbPrivateCapabilityAudience, parseDdbPrivateCapabilityToken, sendDdbPrivateCapabilityRead, type DdbPrivateCapabilityToken } from './ddb-private-capability';
 import { buildDdbCapabilityToken, readDdbTokenLifetimeBound, verifyDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
 import { verifyHostGroupRecord, type HostGroupRecordJSON } from './ddb-host-group';
 import { aliasAddress, aliasChainId, aliasReference, aliasRegistry, assertAliasMetadata,
@@ -2410,17 +2411,52 @@ export class Ddb {
     return { token, ttl };
   }
 
+  /** Explicit private read-only bearer approval. Assignment is independently
+   * authenticated before signing; EndpointDirectory lifetime policy is reused. */
+  async issuePrivateReadCapability(signer: DdbSignerLike, contract: string, role: string,
+    opts: { ttlSeconds?: number; privateRouting?: DdbPrivateReadOptions } = {}): Promise<DdbPrivateCapabilityToken> {
+    const routing = opts.privateRouting ?? this.options.privateRouting;
+    if (!routing) throw new Error('private capability requires authenticated private routing');
+    const policy = validateDdbPrivateReadOptions(routing);
+    if (opts.ttlSeconds !== undefined && (!Number.isInteger(opts.ttlSeconds) || opts.ttlSeconds < 1)) {
+      throw new Error('ttlSeconds must be a positive whole number of seconds');
+    }
+    const resolver = new DdbResolver((m, p) => this.call(m, p));
+    const chainId = await this.call('eth_chainId');
+    const route = await resolver.resolveCurrent(contract);
+    if (!route.enabled || !route.private || await policy.verifyAssignment(route) !== true) throw new Error('private capability assignment is not trusted');
+    const sealed = await resolver.resolve(contract);
+    if (!sealed.resolved) throw new Error('private capability lifetime policy requires the sealed resolver');
+    const bound = await readDdbTokenLifetimeBound((m, p) => this.call(m, p), sealed.resolved.rootBlock);
+    if (BigInt(await this.call('eth_chainId')) !== BigInt(chainId)) throw new Error('private capability network changed during approval');
+    return buildDdbPrivateCapabilityToken(toDdbSigner(signer), { audience: ddbPrivateCapabilityAudience(chainId, route), role,
+      ttlSeconds: Math.min(opts.ttlSeconds ?? 600, bound.seconds) });
+  }
+
   /** ddb_select under a capability token for the token's contract (ddb_tokenSelect). */
-  async tokenSelect(token: DdbCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+  async tokenSelect(token: DdbCapabilityToken | DdbPrivateCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+    const params = [token, tableName, withReadToken(query as DdbQueryOptions)];
+    if ('format' in token) {
+      const privateToken = parseDdbPrivateCapabilityToken(token);
+      if (!this.options.privateRouting) throw new Error('private capability requires authenticated private routing');
+      return sendDdbPrivateCapabilityRead(new DdbResolver((m, p) => this.call(m, p)), this.options.privateRouting,
+        privateToken, 'ddb_tokenSelect', params, await this.call('eth_chainId'));
+    }
     this.refusePrivateCapability();
-    return this.call('ddb_tokenSelect', [token, tableName, withReadToken(query as DdbQueryOptions)]);
+    return this.call('ddb_tokenSelect', params);
   }
 
   /** A read-only procedure of the token's contract under a capability token (ddb_tokenCallReadProcedure). */
-  async tokenCallReadProcedure(token: DdbCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
-    this.refusePrivateCapability();
+  async tokenCallReadProcedure(token: DdbCapabilityToken | DdbPrivateCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
     const params: unknown[] = [token, procedure, args];
     if (consistency) params.push(withReadToken(consistency));
+    if ('format' in token) {
+      const privateToken = parseDdbPrivateCapabilityToken(token);
+      if (!this.options.privateRouting) throw new Error('private capability requires authenticated private routing');
+      return sendDdbPrivateCapabilityRead(new DdbResolver((m, p) => this.call(m, p)), this.options.privateRouting,
+        privateToken, 'ddb_tokenCallReadProcedure', params, await this.call('eth_chainId'));
+    }
+    this.refusePrivateCapability();
     return this.call('ddb_tokenCallReadProcedure', params);
   }
 
