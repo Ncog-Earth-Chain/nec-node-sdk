@@ -5,7 +5,7 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { encodeRlp, keccak256 } from 'ethers';
+import { decodeRlp, encodeRlp, keccak256 } from 'ethers';
 import { Ddb } from '../src/ddb';
 import {
   PROVIDER_REGISTRY_RUNTIME_CODE_HASH, PROVIDER_REGISTRY_A4_RUNTIME_CODE_HASH,
@@ -37,6 +37,36 @@ function withRuntime(original: RegistryProofJSON, runtime: string): RegistryProo
   proof.account.codeHash = runtime;
   proof.account.accountProof = [leaf];
   return proof;
+}
+
+/** Update one authenticated leaf and its hashed ancestors in the retained storage trie. */
+function withStorageWord(original: RegistryProofJSON, slot: string, value: string): RegistryProofJSON {
+  const proof: RegistryProofJSON = JSON.parse(JSON.stringify(original));
+  const target = proof.account.storageProof.find(sp => BigInt(sp.key) === BigInt(slot));
+  if (!target) throw new Error('synthetic fixture storage slot is absent');
+  const replacements = new Map<string, string>();
+  let oldChild = '', newChild = '';
+  for (let i = target.proof.length - 1; i >= 0; i--) {
+    const originalNode = target.proof[i], decoded = decodeRlp(originalNode);
+    if (!Array.isArray(decoded) || decoded.some(Array.isArray)) throw new Error('synthetic fixture requires hashed child references');
+    let fields = decoded as string[];
+    if (i === target.proof.length - 1) {
+      if (fields.length !== 2) throw new Error('synthetic fixture requires a storage leaf');
+      const quantity = BigInt(value).toString(16);
+      fields[1] = encodeRlp(quantity === '0' ? '0x' : '0x' + quantity.padStart(quantity.length + quantity.length % 2, '0'));
+    } else {
+      if (!fields.includes(oldChild)) throw new Error('synthetic fixture ancestor does not bind its child');
+      fields = fields.map(field => field === oldChild ? newChild : field);
+    }
+    const replacement = encodeRlp(fields);
+    replacements.set(originalNode, replacement);
+    oldChild = keccak256(originalNode);
+    newChild = keccak256(replacement);
+  }
+  proof.account.storageHash = newChild;
+  target.value = value;
+  for (const sp of proof.account.storageProof) sp.proof = sp.proof.map(node => replacements.get(node) ?? node);
+  return withRuntime(proof, pins.v2);
 }
 
 const route = (runtime: string) => {
@@ -146,6 +176,27 @@ test('V2-A4 synthetic account proof verifies nine packed members without rebindi
   expect(verifyPlacementProof(record.proof.stateRoot, placement.v2.contract, placement.v2.placementRecord).valid).toBe(false);
   record.members[8] = 99;
   expect(verifyPlacementProof(record.proof.stateRoot, placement.v2.contract, record).valid).toBe(false);
+});
+
+test('V2-A4 coherent proof refuses ninth packed member despite matching served and proven group hash', () => {
+  const record = JSON.parse(JSON.stringify(placement.v2.placementRecord));
+  const base = BigInt(keccak256('0x' + placement.v2.contract.slice(2).padStart(64, '0') + '4'.padStart(64, '0')));
+  const slot = (n: bigint) => '0x' + n.toString(16).padStart(64, '0');
+  const groupSlot = slot(base + BigInt(1));
+  // The same reconstruction with the original group is a positive control.
+  record.proof = withStorageWord(record.proof, groupSlot, record.groupHash);
+  expect(verifyPlacementProof(record.proof.stateRoot, placement.v2.contract, record)).toEqual({ valid: true });
+  record.members[8] = 99;
+  record.groupHash = keccak256('0x' + record.members.map((id: number) => id.toString(16).padStart(64, '0')).join(''));
+  record.proof = withStorageWord(record.proof, groupSlot, record.groupHash);
+  const provenGroup = record.proof.account.storageProof.find((sp: { key: string }) => BigInt(sp.key) === BigInt(groupSlot));
+  const secondMemberSlot = BigInt(keccak256(slot(base + BigInt(2)))) + BigInt(1);
+  const provenNinth = record.proof.account.storageProof.find((sp: { key: string }) => BigInt(sp.key) === secondMemberSlot);
+  expect(provenGroup.value).toBe(record.groupHash);
+  expect(BigInt(provenNinth.value)).toBe(BigInt(9));
+  // This exact reason requires the account, all storage paths and served/proven
+  // group hashes to agree. Omitting only the i>=8 word comparison would accept.
+  expect(verifyPlacementProof(record.proof.stateRoot, placement.v2.contract, record)).toEqual({ valid: false, reason: 'placement member differs' });
 });
 
 test('V2-A4 source evidence and BASE/member grammar retain the exact new runtime word', () => {
