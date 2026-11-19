@@ -7,6 +7,7 @@ import {
 import { type DdbCommittee, type GroupDurableReceipt, ddbCommitteeFromRpc } from './ddb-group-durable';
 import { DdbResolver, type DdbResolverOptions, type ResolveResult, type HostEndpointsJSON } from './ddb-resolve';
 import { sendDdbPrivateRead, validateDdbPrivateReadOptions, type DdbPrivateReadOptions, type DdbCurrentReadRoute } from './ddb-private-read';
+import { buildDdbPrivateCapabilityToken, ddbPrivateCapabilityAudience, parseDdbPrivateCapabilityToken, sendDdbPrivateCapabilityRead, type DdbPrivateCapabilityToken } from './ddb-private-capability';
 import { buildDdbCapabilityToken, readDdbTokenLifetimeBound, verifyDdbCapabilityToken, type DdbCapabilityToken } from './ddb-capability';
 import { verifyHostGroupRecord, type HostGroupRecordJSON } from './ddb-host-group';
 import { aliasAddress, aliasChainId, aliasReference, aliasRegistry, assertAliasMetadata,
@@ -2298,17 +2299,23 @@ export class Ddb {
   private resolver: DdbResolver | null = null;
 
   /**
-   * The host group serving a contract's database (ddb_resolveDatabase), cached per sealed epoch: never served across
-   * a seal. `opts` turns on the record-proof check against a trusted header source and the two-node cross-check
+   * The host group serving a contract's database (ddb_resolveDatabase), cached per observed chain ID, contract and
+   * sealed epoch. `opts` turns on the record-proof check against a trusted header source and the two-node cross-check
    * (owner ruling 35, Q1 (a)); an older node without the resolver yields `{ fallback: true }` (use this node).
    * Alias references are revalidated first and use a fresh resolver scoped to the selected chain.
    */
   async resolve(contract: string | DdbContractAlias, opts?: DdbResolverOptions): Promise<ResolveResult> {
     if (typeof contract !== 'string') {
       const selected = await this.revalidateAlias(contract);
-      // The legacy resolver cache is epoch/contract-scoped, not chain-scoped. A selected alias uses
-      // a fresh resolver so switching networks cannot reuse another chain's equal-epoch answer.
-      const result = await new DdbResolver((m, p) => this.call(m, p), opts).resolve(selected.contractAddress);
+      // Every resolver identity observation must also match the selected alias. A resolver that consistently
+      // observes another chain must not become acceptable if the provider switches back before the final check.
+      const result = await new DdbResolver(async (m, p) => {
+        const value = await this.call(m, p);
+        if (m === 'eth_chainId' && aliasChainId(value) !== selected.chainId) {
+          throw new Error('ddb alias: selected chain does not match the current network');
+        }
+        return value;
+      }, opts).resolve(selected.contractAddress);
       if (!result.fallback && result.resolved?.database !== selected.dbName) {
         throw new Error('ddb alias: placement answer does not match the selected contract schema');
       }
@@ -2353,8 +2360,11 @@ export class Ddb {
   }
 
   /**
-   * The group the placement engine WOULD place a contract on in the current sealed epoch (ddb_quotePlacement): every
-   * provider live at the seal, R = all, with the PlacementManager.place calldata. Books nothing.
+   * A candidate placement group for the current sealed epoch (ddb_quotePlacement), R = all. Books nothing.
+   * The answer is node-served sealed computation; SDK
+   * registry/placement proofs do not authenticate its canonical HostBonds installation or free collateral.
+   * PlaceArgs are executable only for a V1 target. A V2 target returns empty calldata ('0x') because its place
+   * selector always reverts; members/size are candidate inputs to the existing consent/handoff workflow.
    */
   quotePlacement(req: { contract: string; owner: string; replicaBytes: string | number | bigint; tier?: 'shared' | 'dedicated' }): Promise<any> {
     return this.call('ddb_quotePlacement', [{ ...req, replicaBytes: '0x' + BigInt(req.replicaBytes).toString(16) }]);
@@ -2401,17 +2411,52 @@ export class Ddb {
     return { token, ttl };
   }
 
+  /** Explicit private read-only bearer approval. Assignment is independently
+   * authenticated before signing; EndpointDirectory lifetime policy is reused. */
+  async issuePrivateReadCapability(signer: DdbSignerLike, contract: string, role: string,
+    opts: { ttlSeconds?: number; privateRouting?: DdbPrivateReadOptions } = {}): Promise<DdbPrivateCapabilityToken> {
+    const routing = opts.privateRouting ?? this.options.privateRouting;
+    if (!routing) throw new Error('private capability requires authenticated private routing');
+    const policy = validateDdbPrivateReadOptions(routing);
+    if (opts.ttlSeconds !== undefined && (!Number.isInteger(opts.ttlSeconds) || opts.ttlSeconds < 1)) {
+      throw new Error('ttlSeconds must be a positive whole number of seconds');
+    }
+    const resolver = new DdbResolver((m, p) => this.call(m, p));
+    const chainId = await this.call('eth_chainId');
+    const route = await resolver.resolveCurrent(contract);
+    if (!route.enabled || !route.private || await policy.verifyAssignment(route) !== true) throw new Error('private capability assignment is not trusted');
+    const sealed = await resolver.resolve(contract);
+    if (!sealed.resolved) throw new Error('private capability lifetime policy requires the sealed resolver');
+    const bound = await readDdbTokenLifetimeBound((m, p) => this.call(m, p), sealed.resolved.rootBlock);
+    if (BigInt(await this.call('eth_chainId')) !== BigInt(chainId)) throw new Error('private capability network changed during approval');
+    return buildDdbPrivateCapabilityToken(toDdbSigner(signer), { audience: ddbPrivateCapabilityAudience(chainId, route), role,
+      ttlSeconds: Math.min(opts.ttlSeconds ?? 600, bound.seconds) });
+  }
+
   /** ddb_select under a capability token for the token's contract (ddb_tokenSelect). */
-  async tokenSelect(token: DdbCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+  async tokenSelect(token: DdbCapabilityToken | DdbPrivateCapabilityToken, tableName: string, query: DdbQueryOptions | Record<string, unknown> = {}): Promise<DdbRow[]> {
+    const params = [token, tableName, withReadToken(query as DdbQueryOptions)];
+    if ('format' in token) {
+      const privateToken = parseDdbPrivateCapabilityToken(token);
+      if (!this.options.privateRouting) throw new Error('private capability requires authenticated private routing');
+      return sendDdbPrivateCapabilityRead(new DdbResolver((m, p) => this.call(m, p)), this.options.privateRouting,
+        privateToken, 'ddb_tokenSelect', params, await this.call('eth_chainId'));
+    }
     this.refusePrivateCapability();
-    return this.call('ddb_tokenSelect', [token, tableName, withReadToken(query as DdbQueryOptions)]);
+    return this.call('ddb_tokenSelect', params);
   }
 
   /** A read-only procedure of the token's contract under a capability token (ddb_tokenCallReadProcedure). */
-  async tokenCallReadProcedure(token: DdbCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
-    this.refusePrivateCapability();
+  async tokenCallReadProcedure(token: DdbCapabilityToken | DdbPrivateCapabilityToken, procedure: string, args: string[] = [], consistency?: DdbReadConsistency): Promise<DdbRow[]> {
     const params: unknown[] = [token, procedure, args];
     if (consistency) params.push(withReadToken(consistency));
+    if ('format' in token) {
+      const privateToken = parseDdbPrivateCapabilityToken(token);
+      if (!this.options.privateRouting) throw new Error('private capability requires authenticated private routing');
+      return sendDdbPrivateCapabilityRead(new DdbResolver((m, p) => this.call(m, p)), this.options.privateRouting,
+        privateToken, 'ddb_tokenCallReadProcedure', params, await this.call('eth_chainId'));
+    }
+    this.refusePrivateCapability();
     return this.call('ddb_tokenCallReadProcedure', params);
   }
 

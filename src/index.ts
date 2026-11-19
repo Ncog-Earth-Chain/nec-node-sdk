@@ -62,7 +62,8 @@ export {
 } from './ddb-private-read-node';
 export {
   verifyRegistryProof, verifyPlacementProof, verifyMptProof, providerSlot, PROVIDER_REGISTRY_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_RUNTIME_CODE_HASH,
-  PLACEMENT_MANAGER_V2_RUNTIME_CODE_HASH, isSupportedPlacementManagerRuntime,
+  PROVIDER_REGISTRY_A4_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_V2_RUNTIME_CODE_HASH, PLACEMENT_MANAGER_V2_A4_RUNTIME_CODE_HASH,
+  isSupportedProviderRegistryRuntime, isSupportedPlacementManagerRuntime, isPlacementManagerV2Runtime, hasA4BookingRuntimeGuards,
   type RegistryProofJSON, type PlacementRecordJSON, type ServedProvider, type ProviderRecordJSON, type ProofVerdict,
 } from './ddb-proof';
 export {
@@ -94,7 +95,7 @@ export { createDdbPrivateClient } from './ddb-private-client';
 export type { DdbPrivateClientOptions, DdbPrivatePrepareInput } from './ddb-private-client';
 export { createDdbTrustedNodePrivatePolicy, connectDdbNodePrivateEvidence } from './ddb-private-trust-node';
 export type { DdbTrustedNodePrivateOptions } from './ddb-private-trust-node';
-export type { DdbPrivateCustodyBinding, DdbPrivateCustodyPolicy, DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
+export type { DdbPrivateCustodyBinding, DdbPrivateCustodyPolicy, DdbAuthenticatedCustodyTransport, DdbPrivateCustodyContext } from './ddb-private-custody';
 export { connectDdbNodePrivateCustody } from './ddb-private-custody-node';
 export type { DdbNodeAuthenticatedCustodyTransport } from './ddb-private-custody-node';
 export { createDdbNodePrivateRetryStore } from './ddb-private-retry-node';
@@ -144,3 +145,15 @@ export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther
 export { getAllTransactions, getAllTokens } from './graphql';
 // PRIV-02 (NEC-84): client-side envelope for CONFIDENTIAL columns + recipient-key directory digests.
 export * as confidential from './confidential';
+
+export {
+  DDB_PRIVATE_CAPABILITY_FORMAT, DDB_PRIVATE_CAPABILITY_DOMAIN, normalizeDdbPrivateCapabilityRole,
+  canonicalDdbPrivateCapabilityBytes, canonicalDdbPrivateCapabilityHash, parseDdbPrivateCapabilityToken,
+  buildDdbPrivateCapabilityToken, verifyDdbPrivateCapabilityToken, ddbPrivateCapabilityAudience,
+  type DdbPrivateCapabilityAudience, type DdbPrivateCapabilityFields, type DdbPrivateCapabilityToken,
+  type BuildDdbPrivateCapabilityOptions, type VerifyDdbPrivateCapabilityOptions,
+} from './ddb-private-capability';
+
+// Node/native-helper ciphertext carrier; selected-host inner TLS remains authoritative.
+export { createDdbNodePrivateTunnelDialer, ownDdbPrivateTunnelRoute, projectDdbPrivateTunnelRoute } from './ddb-private-tunnel-node';
+export type { DdbPrivateTunnelRoute, DdbNodePrivateTunnelOptions, DdbPrivateNodeSocketDialer } from './ddb-private-tunnel-node';

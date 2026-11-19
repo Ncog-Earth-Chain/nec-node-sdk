@@ -11,6 +11,7 @@ const METHODS = Object.freeze(['ddb_getPrivateAssignmentEvidence', 'ddb_getPriva
 
 /** Authenticate the explicitly configured source directly. No route discovery or policy recursion. */
 export async function connectDdbNodePrivateEvidence(source: DdbPrivateEvidenceSource, options: DdbNodePrivateReadTransportOptions = {}) {
+  if (options.tunnel || options.socketDialer) throw new Error('private evidence source uses its explicit direct authenticated channel');
   const s = obj(source, ['validatorId', 'address', 'url', 'tlsKeyHash']);
   const binding = Object.freeze({ validatorId: evidenceRecipient(s.validatorId), address: fixed(s.address, 20),
     url: evidenceOrigin(s.url), tlsKeyHash: fixed(s.tlsKeyHash, 32) });
@@ -26,7 +27,7 @@ export interface DdbTrustedNodePrivateOptions extends DdbPrivateAuthority {
 function optionsCopy(options: DdbNodePrivateReadTransportOptions = {}): DdbNodePrivateReadTransportOptions {
   const ca = Array.isArray(options.ca) ? options.ca.map(v => typeof v === 'string' ? v : Buffer.from(v)) :
     typeof options.ca === 'string' || options.ca === undefined ? options.ca : Buffer.from(options.ca as Buffer);
-  return Object.freeze({ ca, timeoutMs: options.timeoutMs, maxRequestBytes: options.maxRequestBytes, maxResponseBytes: options.maxResponseBytes });
+  return Object.freeze({ ca, tunnel: options.tunnel ? Object.freeze({ ...options.tunnel, ca: options.tunnel.ca }) : undefined, socketDialer: options.socketDialer, timeoutMs: options.timeoutMs, maxRequestBytes: options.maxRequestBytes, maxResponseBytes: options.maxResponseBytes });
 }
 /** @internal Capture Node TLS options before any asynchronous callback. Not a package export. */
 export function ddbNodePrivateOptions(input: DdbTrustedNodePrivateOptions): DdbTrustedPrivateOptions {
@@ -37,7 +38,7 @@ export function ddbNodePrivateOptions(input: DdbTrustedNodePrivateOptions): DdbT
       return Object.freeze({ ...channel, send: (method: string, params: readonly unknown[]) => channel.send(method, Array.from(params)) });
     },
     connectHost: (connection, trusted) => connectDdbNodePrivateRead(connection, trusted, hostTls),
-    connectCustodyHost: trusted => connectDdbNodePrivateCustody(trusted, hostTls),
+    connectCustodyHost: (trusted, context) => connectDdbNodePrivateCustody(trusted, hostTls, context),
   };
 }
 

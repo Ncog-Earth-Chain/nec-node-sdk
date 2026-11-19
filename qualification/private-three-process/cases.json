@@ -1,0 +1,54 @@
+{
+  "format": "nec93-private-three-process-cases-v1",
+  "BASIC": 0,
+  "cases": [
+    {
+      "id": "TP01",
+      "action": "tokenSelect",
+      "method": "ddb_tokenSelect",
+      "expected": "actual private token/table/query params reach the selected TLS host and row sentinel returns",
+      "status": "DEFERRED"
+    },
+    {
+      "id": "TP02",
+      "action": "tokenProcedure",
+      "method": "ddb_tokenCallReadProcedure",
+      "expected": "actual private token/procedure/args params reach selected TLS host and row sentinel returns",
+      "status": "DEFERRED"
+    },
+    {
+      "id": "TP03",
+      "action": "preview",
+      "method": "ddb_previewPrivateBatch",
+      "expected": "preview sentinel crosses actual inner TLS only; this transport host grants no preview authority",
+      "status": "DEFERRED"
+    },
+    {
+      "id": "TP04",
+      "action": "sidecar",
+      "method": "ddb_putPayloadBatch",
+      "expected": "sidecar sentinel crosses actual inner TLS only; this transport host certifies no custody",
+      "status": "DEFERRED"
+    },
+    {
+      "id": "TP05",
+      "action": "wrongPin",
+      "method": "ddb_tokenSelect",
+      "expected": "actual inner SPKI mismatch refuses before private HTTP; no negative pin sentinel at host",
+      "status": "DEFERRED"
+    },
+    {
+      "id": "TP06",
+      "action": "refusedTarget",
+      "method": "ddb_tokenSelect",
+      "expected": "production Go finalized assignment rejects nonmember validator2 route before selected dial/HTTP",
+      "status": "DEFERRED"
+    },
+    {
+      "id": "TP07",
+      "action": "capture",
+      "expected": "decode and unmask Goingress captured WSSframes; no private query/token/arg/row/preview/sidecar sentinels; distinct role PIDs; bounded owned cleanup",
+      "status": "DEFERRED"
+    }
+  ]
+}

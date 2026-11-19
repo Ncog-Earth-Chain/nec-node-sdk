@@ -93,7 +93,7 @@ describe('wallet aliases use existing registry and canonical Ddb flows', () => {
     expect(f.send.mock.calls.some(([m]) => m === 'ddb_resolveDatabase')).toBe(false);
   });
 
-  test('an alias cannot reuse the legacy resolver cache from another equal-epoch chain', async () => {
+  test('an alias cannot reuse the ordinary resolver cache from another equal-epoch chain', async () => {
     const f = fixture();
     let root = 'first chain';
     f.send.mockImplementation(async (m: string): Promise<any> => {
@@ -107,6 +107,49 @@ describe('wallet aliases use existing registry and canonical Ddb flows', () => {
     root = 'second chain';
     expect((await f.ddb.resolve({ ...ref(), chainId: '2' })).resolved?.stateRoot).toBe('second chain');
     expect(f.send.mock.calls.filter(([m]) => m === 'ddb_resolveDatabase')).toHaveLength(2);
+  });
+
+  test('an alias refuses a primary network switch during placement resolution', async () => {
+    const f = fixture();
+    let chain = '0x1';
+    f.send.mockImplementation(async (m: string): Promise<any> => {
+      if (m === 'eth_chainId') return chain;
+      if (m === 'ddb_getSchema') return { contracts: [a] };
+      if (m === 'eth_getBlockByNumber') return { epoch: 7 };
+      if (m === 'ddb_resolveDatabase') {
+        chain = '0x2';
+        return { contract: a.contract_address, database: a.db_name, epoch: 7 };
+      }
+      throw new Error(m);
+    });
+    await expect(f.ddb.resolve(ref())).rejects.toThrow(/network|chain/i);
+    expect(f.send.mock.calls.filter(([m]) => m === 'ddb_resolveDatabase')).toHaveLength(1);
+  });
+
+  test('an alias refuses any resolver-observed chain other than the selected chain', async () => {
+    const f = fixture();
+    let identities = 0;
+    f.send.mockImplementation(async (m: string): Promise<any> => {
+      // Metadata sees A, an entire plain resolver miss sees B, and the final alias check would see A.
+      if (m === 'eth_chainId') return ++identities <= 2 || identities >= 6 ? '0x1' : '0x2';
+      if (m === 'ddb_getSchema') return { contracts: [a] };
+      if (m === 'eth_getBlockByNumber') return { epoch: 7 };
+      if (m === 'ddb_resolveDatabase') return { contract: a.contract_address, database: a.db_name, epoch: 7 };
+      throw new Error(m);
+    });
+    await expect(f.ddb.resolve(ref())).rejects.toThrow(/network|chain/i);
+    expect(f.send.mock.calls.some(([m]) => m === 'ddb_resolveDatabase')).toBe(false);
+  });
+
+  test('an alias refuses an optional second node on another chain before using its matching placement', async () => {
+    const f = fixture();
+    const secondary = jest.fn(async (m: string): Promise<any> => {
+      if (m === 'eth_chainId') return '0x2';
+      return { contract: a.contract_address, database: a.db_name, epoch: 1 };
+    });
+    await expect(f.ddb.resolve(ref(), { crossCheck: secondary })).rejects.toThrow(/network|chain/i);
+    expect(secondary.mock.calls.every(([m]) => m === 'eth_chainId')).toBe(true);
+    expect(f.send.mock.calls.some(([m]) => m === 'ddb_resolveDatabase')).toBe(false);
   });
 
   test('a placement answer cannot substitute another database for the selected alias', async () => {

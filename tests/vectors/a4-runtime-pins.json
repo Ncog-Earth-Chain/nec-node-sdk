@@ -1,0 +1,12 @@
+{
+  "registry": "0xcd5a8e0bd478d88c2126f4f6ce61efdf089ee66d6df2ad7d3ff92304c49b60f0",
+  "v2": "0x028f2a91e985f2ff535f211da76cd0b05c48ce79578429c5dfc66e5964f7329d",
+  "origin": "Reviewed Azure compile01 selected artifacts, independently reproduced; bounded contract-component acceptance only.",
+  "contractComponentRootDecisionSHA256": "c8694c1a3340fbb7c314e225b90e56f379e4caa07f6d8fbc95153f6b0a834d9f",
+  "registryRuntimeFileSHA256": "cd4d0fabbd56e8a9e10ba26e7c08c00e7642399acb83d15d25a8350de0471810",
+  "v2RuntimeFileSHA256": "941e52b167459dcc77fececca3f6d5c41dc3ec970acdae2cc6b823dfdee87144",
+  "registryOptimizerRuns": 10000,
+  "v2OptimizerRuns": 200,
+  "compiler": "solc 0.8.20, Berlin, metadata.bytecodeHash none",
+  "proofFixtureScope": "Synthetic one-account MPT leaves reuse legacy storage proofs. No SDK execution, collateral proof, handoff execution or runtime rollout is established by these files."
+}
