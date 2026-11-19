@@ -1,5 +1,6 @@
 import { verifyRegistryProof, verifyPlacementProof, type RegistryProofJSON, type ServedProvider, type PlacementRecordJSON } from './ddb-proof';
 import { parseDdbCurrentReadRoute, type DdbCurrentReadRoute } from './ddb-private-read';
+import { aliasChainId } from './ddb-aliases';
 
 /**
  * PLACE-02 phase B/C client side (NEC-93; docs/design/place-02-provider-discovery.md §5, §6 "SDK and wallet
@@ -7,13 +8,12 @@ import { parseDdbCurrentReadRoute, type DdbCurrentReadRoute } from './ddb-privat
  *
  * `DdbResolver.resolve(contract)` answers which host group serves a contract's database:
  *
- *   1. `ddb_resolveDatabase` at the configured node (any node answers, DDB or not), cached per contract and keyed
- *      on the sealed EPOCH: a cached answer is served only while the chain's current epoch is the answer's, and the
- *      next seal (the epoch moving) is the whole invalidation (§5) -- never an answer across a seal;
+ *   1. `ddb_resolveDatabase` at the configured node (any node answers, DDB or not), cached per chain ID and contract
+ *      for the sealed EPOCH: a cached answer is served only while the observed network and current epoch agree;
  *   2. with `withProof`, every member's provider record is verified against the stateRoot of the header of
  *      `rootBlock` fetched from `headerSource` (the node the USER trusts for headers; ddb-proof.ts);
  *   3. with `crossCheck`, a second node's answer must agree on the epoch, the sealed root, the sealed consenting set
- *      and the host group (those are node-asserted, Q2 (a): agreement is the check);
+ *      and the host group on the same chain ID (those are node-asserted, Q2 (a): agreement is the check);
  *   4. an older node answering -32601 (no resolver) yields `{ fallback: true }`: today's behaviour, the configured
  *      node for everything.
  *
@@ -111,25 +111,72 @@ export class DdbResolver {
     return num(b.epoch);
   }
 
-  /** Resolve the host group of a contract's database (cached per sealed epoch). */
+  /** Canonical chain ID uses the same accepted encodings as selected aliases; it is still node-asserted. */
+  private async networkIdentity(sources: RpcSend[]): Promise<string> {
+    const identities = await Promise.all(sources.map(async (send) => {
+      const value = await send('eth_chainId', []);
+      try {
+        return aliasChainId(value);
+      } catch {
+        throw new Error('the resolver source did not report a valid chain ID');
+      }
+    }));
+    if (identities.some((id) => id !== identities[0])) {
+      throw new Error('the resolver sources disagree on the network chain ID; refusing to route');
+    }
+    return identities[0];
+  }
+
+  private async assertNetworkIdentity(sources: RpcSend[], expected: string): Promise<void> {
+    if (await this.networkIdentity(sources) !== expected) {
+      throw new Error('the resolver network chain ID changed during resolution; refusing to route');
+    }
+  }
+
+  /**
+   * Resolve the host group of a contract's database, cached per chain ID/contract/sealed epoch.
+   * Identity observations bracket the epoch (including cache hits), primary answer and optional header/secondary
+   * awaits. Those freshness checks add RPC round trips; independent sources and header/secondary reads run in
+   * parallel. No answer or fallback is published after an observed switch or unknown identity. Equal chain IDs
+   * and switches away and back between observations cannot be distinguished by this existing RPC identity.
+   */
   async resolve(contract: string): Promise<ResolveResult> {
-    const key = contract.toLowerCase();
+    const contractKey = contract.toLowerCase();
+    // Snapshot the selected sources before awaiting; caller mutation of options cannot retarget an in-flight use.
+    const withProof = !!this.opts.withProof;
+    const hs = this.opts.headerSource ?? this.send;
+    const crossCheck = this.opts.crossCheck;
+    const sources = [...new Set([this.send, ...(withProof ? [hs] : []), ...(crossCheck ? [crossCheck] : [])])];
+    const network = await this.networkIdentity(sources);
+    const key = network + ':' + contractKey;
     const epoch = await this.currentEpoch();
+    await this.assertNetworkIdentity(sources, network);
     const hit = this.cache.get(key);
     if (hit?.resolved && hit.resolved.epoch === epoch) return hit;
 
     let answer: ResolvedDatabase;
     try {
-      answer = await this.send('ddb_resolveDatabase', this.opts.withProof ? [contract, { withProof: true }] : [contract]);
+      answer = await this.send('ddb_resolveDatabase', withProof ? [contract, { withProof: true }] : [contract]);
     } catch (e) {
-      if (isMethodNotFound(e)) return { fallback: true };
+      if (isMethodNotFound(e)) {
+        await this.assertNetworkIdentity(sources, network);
+        return { fallback: true };
+      }
       throw e;
     }
+    await this.assertNetworkIdentity(sources, network);
     let proven = false;
-    if (answer.contract.toLowerCase() !== key) throw new Error('the resolver answered for another contract');
-    if (this.opts.withProof) {
-      const hs = this.opts.headerSource ?? this.send;
-      const header = await hs('eth_getBlockByNumber', ['0x' + answer.rootBlock.toString(16), false]);
+    if (answer.contract.toLowerCase() !== contractKey) throw new Error('the resolver answered for another contract');
+    let header: any;
+    let other: ResolvedDatabase | undefined;
+    if (withProof || crossCheck) {
+      [header, other] = await Promise.all([
+        withProof ? hs('eth_getBlockByNumber', ['0x' + answer.rootBlock.toString(16), false]) : undefined,
+        crossCheck ? crossCheck('ddb_resolveDatabase', [contract]) : undefined,
+      ]);
+      await this.assertNetworkIdentity(sources, network);
+    }
+    if (withProof) {
       if (!header || String(header.stateRoot).toLowerCase() !== answer.stateRoot.toLowerCase()) {
         throw new Error(`the trusted header of rootBlock ${answer.rootBlock} does not carry the answer's stateRoot`);
       }
@@ -143,8 +190,7 @@ export class DdbResolver {
       }
       proven = true;
     }
-    if (this.opts.crossCheck) {
-      const other: ResolvedDatabase = await this.opts.crossCheck('ddb_resolveDatabase', [contract]);
+    if (crossCheck) {
       const shape = (r: ResolvedDatabase) => JSON.stringify({
         contract: r.contract.toLowerCase(), database: r.database, placement: r.placement, databaseScoped: r.databaseScoped,
         epoch: r.epoch, rootBlock: r.rootBlock, sealTime: r.sealTime, stateRoot: r.stateRoot.toLowerCase(), sealed: r.sealedConsenting,
@@ -157,12 +203,12 @@ export class DdbResolver {
           members: r.placementRecord.members, enforced: r.placementRecord.enforced, unavailable: r.placementRecord.unavailableMembers ?? [],
         } : null,
       });
-      if (shape(other) !== shape(answer)) {
+      if (shape(other!) !== shape(answer)) {
         throw new Error('the two nodes disagree on the sealed host group; refusing to route (Q1 (a) cross-check)');
       }
     }
     const res: ResolveResult = { fallback: false, resolved: answer, proven };
-    // Cached only for the epoch it describes: if the chain already moved past it, it is not kept.
+    // No awaits after the last identity check: publish/cache only under the observed network and sealed epoch.
     if (answer.epoch === epoch) this.cache.set(key, res);
     return res;
   }

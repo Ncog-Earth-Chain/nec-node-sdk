@@ -42,7 +42,8 @@ test('an account with another runtime cannot prove a placement', () => {
 
 test('resolver proof mode verifies both provider records and the attached booking', async () => {
   const a = fresh();
-  const send = async (method: string) => method === 'eth_getBlockByNumber' ? { epoch: a.epoch, stateRoot: a.stateRoot } : a;
+  const send = async (method: string) => method === 'eth_chainId' ? '0x1' :
+    method === 'eth_getBlockByNumber' ? { epoch: a.epoch, stateRoot: a.stateRoot } : a;
   expect((await new DdbResolver(send, { withProof: true }).resolve(a.contract)).proven).toBe(true);
   a.placementRecord.version = '0x8';
   await expect(new DdbResolver(send, { withProof: true }).resolve(a.contract)).rejects.toThrow(/placement proof/);
@@ -52,6 +53,8 @@ test('valid storage proofs do not bypass cross-checking the activation metadata'
   const a = fresh();
   const other = fresh();
   other.placementRecord.enforced = false;
-  const send = async (method: string) => method === 'eth_getBlockByNumber' ? { epoch: a.epoch, stateRoot: a.stateRoot } : a;
-  await expect(new DdbResolver(send, { withProof: true, crossCheck: async () => other }).resolve(a.contract)).rejects.toThrow(/disagree/);
+  const send = async (method: string) => method === 'eth_chainId' ? '0x1' :
+    method === 'eth_getBlockByNumber' ? { epoch: a.epoch, stateRoot: a.stateRoot } : a;
+  await expect(new DdbResolver(send, { withProof: true, crossCheck: async (method) => method === 'eth_chainId' ? '0x1' : other })
+    .resolve(a.contract)).rejects.toThrow(/disagree/);
 });

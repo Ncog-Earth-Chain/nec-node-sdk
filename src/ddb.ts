@@ -2298,17 +2298,23 @@ export class Ddb {
   private resolver: DdbResolver | null = null;
 
   /**
-   * The host group serving a contract's database (ddb_resolveDatabase), cached per sealed epoch: never served across
-   * a seal. `opts` turns on the record-proof check against a trusted header source and the two-node cross-check
+   * The host group serving a contract's database (ddb_resolveDatabase), cached per observed chain ID, contract and
+   * sealed epoch. `opts` turns on the record-proof check against a trusted header source and the two-node cross-check
    * (owner ruling 35, Q1 (a)); an older node without the resolver yields `{ fallback: true }` (use this node).
    * Alias references are revalidated first and use a fresh resolver scoped to the selected chain.
    */
   async resolve(contract: string | DdbContractAlias, opts?: DdbResolverOptions): Promise<ResolveResult> {
     if (typeof contract !== 'string') {
       const selected = await this.revalidateAlias(contract);
-      // The legacy resolver cache is epoch/contract-scoped, not chain-scoped. A selected alias uses
-      // a fresh resolver so switching networks cannot reuse another chain's equal-epoch answer.
-      const result = await new DdbResolver((m, p) => this.call(m, p), opts).resolve(selected.contractAddress);
+      // Every resolver identity observation must also match the selected alias. A resolver that consistently
+      // observes another chain must not become acceptable if the provider switches back before the final check.
+      const result = await new DdbResolver(async (m, p) => {
+        const value = await this.call(m, p);
+        if (m === 'eth_chainId' && aliasChainId(value) !== selected.chainId) {
+          throw new Error('ddb alias: selected chain does not match the current network');
+        }
+        return value;
+      }, opts).resolve(selected.contractAddress);
       if (!result.fallback && result.resolved?.database !== selected.dbName) {
         throw new Error('ddb alias: placement answer does not match the selected contract schema');
       }
