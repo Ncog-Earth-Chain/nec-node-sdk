@@ -4,7 +4,7 @@ import { decodePrivateTxnBaseV1, encodePrivateTxnBaseV1, encodePrivateTxnIntentV
 import type { DdbPrivatePreparedSnapshotRequest } from './ddb-private-txn-online';
 import type { DdbPrivateTxnExpectation, DdbPrivateTxnFinalityCandidate } from './ddb-private-txn-outcome';
 import { parsePrivateCustodyEndpoint, ownPrivateCustodyBinding, type DdbPrivateCustodyBinding,
-  type DdbPrivateCustodyPolicy, type DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
+  type DdbPrivateCustodyPolicy, type DdbPrivateCustodyContext, type DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
 import { MLDSA87_PUBKEY_BYTES, MLDSA87_SIG_BYTES } from './key-registry';
 import { DDB_COMMITMENT_PAYLOAD_MAX_BYTES } from './ddb-commitment';
 import { evidenceHex as hex, evidenceFail as fail, evidenceObject as obj, evidenceFixed as fixed, evidenceBytes as bytes,
@@ -30,7 +30,7 @@ export interface DdbTrustedPrivateOptions extends DdbPrivateAuthority {
   /** Authenticate the independently observed full binding on the channel used by send. */
   connectHost(connection: DdbPrivateReadConnection, independentlyTrustedBinding: DdbTrustedReadEndpoint): Promise<DdbPrivateHostChannel>;
   /** Optional concrete retained-outcome channel; generic browser/mobile callers must supply one explicitly. */
-  connectCustodyHost?(independentlyTrustedBinding: DdbPrivateCustodyBinding): Promise<DdbAuthenticatedCustodyTransport>;
+  connectCustodyHost?(independentlyTrustedBinding: DdbPrivateCustodyBinding, context?: DdbPrivateCustodyContext): Promise<DdbAuthenticatedCustodyTransport>;
 }
 function matchesBase(route: DdbCurrentReadRoute, base: PrivateTxnBaseV1): boolean {
   return route.database === base.database && route.contract === base.contract && route.block === '0x' + base.block.toString(16) &&
@@ -96,14 +96,21 @@ export function createDdbTrustedPrivatePolicy(input: DdbTrustedPrivateOptions) {
     } catch { return fail(); } finally { try { channel?.close(); } catch { /* No adapter text disclosure. */ } }
   }
   const custodyPolicy: DdbPrivateCustodyPolicy | undefined = connectCustodyHost ? Object.freeze({
-    async connect(inputID: number): Promise<DdbAuthenticatedCustodyTransport> {
+    async connect(inputID: number, context?: DdbPrivateCustodyContext): Promise<DdbAuthenticatedCustodyTransport> {
       let channel: DdbAuthenticatedCustodyTransport | undefined;
       try {
         const validatorId = evidenceRecipient(inputID);
+        let original: DdbPrivateCustodyContext | undefined;
+        if (context) {
+          const txnId = fixed(context.txnId, 32), route = evidenceRoute(authority.database, context.originalPlacement);
+          const retained = await assignment(route.block);
+          if (!samePrivateRoute(route, retained.placement) || !route.members.some(m => m.validatorId === validatorId)) return fail();
+          original = Object.freeze({ txnId, originalPlacement: route });
+        }
         const chain = await readPublic('eth_chainId', []);
         if (typeof chain !== 'string' || !/^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/.test(chain) || BigInt(chain) !== BigInt(authority.chain)) return fail();
         const trusted = parsePrivateCustodyEndpoint(await readPublic('ddb_hostEndpoints', [[validatorId]]), authority.chain, validatorId, authority.source);
-        channel = await connectCustodyHost(trusted);
+        channel = await connectCustodyHost(trusted, original);
         const binding = ownPrivateCustodyBinding(channel?.binding);
         if (JSON.stringify(binding) !== JSON.stringify(trusted) || channel.endpointAuthenticated !== true ||
           channel.confidentiality !== 'post-quantum' || typeof channel.send !== 'function' || typeof channel.close !== 'function') return fail();

@@ -1,4 +1,5 @@
 ﻿import { openPrivateNodeChannel } from './ddb-private-channel-node';
+import { createDdbNodePrivateTunnelDialer, projectDdbPrivateTunnelRoute, type DdbPrivateNodeSocketDialer, type DdbNodePrivateTunnelOptions } from './ddb-private-tunnel-node';
 import {
   parseDdbCurrentReadRoute,
   type DdbAuthenticatedReadTransport,
@@ -12,6 +13,10 @@ export type DdbNodeTrustedReadEndpoint = DdbTrustedReadEndpoint;
 export interface DdbNodePrivateReadTransportOptions {
   /** Optional explicit CA roots. Normal certificate chain and hostname checks remain mandatory. */
   ca?: string | Buffer | readonly (string | Buffer)[];
+  /** Explicit raw byte carrier; actual selected-host TLS authentication still runs inside it. */
+  socketDialer?: DdbPrivateNodeSocketDialer;
+  /** Automatic public projection for this independently authenticated selected assignment. */
+  tunnel?: Omit<DdbNodePrivateTunnelOptions, 'route'> & { readonly chainId: string };
   /** One deadline for handshake, waiting to send, and response. Default 10 seconds; maximum 5 minutes. */
   timeoutMs?: number;
   /** Local resource limits, each at most 64 MiB. Defaults: request 1 MiB, response 4 MiB. */
@@ -51,9 +56,12 @@ export async function connectDdbNodePrivateRead(
       !connection.endpoints.some(e => e.scheme === 'https' && e.url === trusted.url && e.tlsKeyHash === trusted.tlsKeyHash)) {
     throw new Error('private read endpoint does not match trusted assignment and endpoint');
   }
+  if (options.tunnel && options.socketDialer) throw new Error('private read accepts one explicit transport dialer');
+  const transportOptions = options.tunnel ? { ...options, socketDialer: createDdbNodePrivateTunnelDialer({ ...options.tunnel,
+    route: projectDdbPrivateTunnelRoute(options.tunnel.chainId, route, member.validatorId) }) } : options;
   const channel = await openPrivateNodeChannel(trustedURL, trustedPin,
-    ['ddb_signedSelect', 'ddb_signedCallReadProcedure', 'ddb_getPrivateTransactionOutcome',
-      'ddb_previewPrivateBatch', 'ddb_putPayloadBatch', 'ddb_submitSignedTransaction'], options);
+    ['ddb_signedSelect', 'ddb_signedCallReadProcedure', 'ddb_tokenSelect', 'ddb_tokenCallReadProcedure', 'ddb_getPrivateTransactionOutcome',
+      'ddb_previewPrivateBatch', 'ddb_putPayloadBatch', 'ddb_submitSignedTransaction'], transportOptions);
   return Object.freeze({ ...channel,
     binding: Object.freeze({ route, validatorId: member.validatorId, address: member.address, url: trustedURL, tlsKeyHash: trustedPin }) });
 }
