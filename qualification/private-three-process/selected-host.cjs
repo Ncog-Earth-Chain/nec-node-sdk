@@ -11,7 +11,7 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const cert = fs.readFileSync(config.certFile), key = fs.readFileSync(config.keyFile);
 const pin = '0x' + createHash('sha256').update(new X509Certificate(cert).publicKey.export({ type:'spki',format:'der' })).digest('hex');
 const sockets = new Set(), requests = [], rowSentinel = 'private-row-sentinel';
-let trusted, secureConnections = 0, stopped = false, failed;
+let trusted, secureConnections = 0, tcpConnections = 0, stopped = false, failed;
 const server = https.createServer({ cert,key,minVersion:'TLSv1.3',maxVersion:'TLSv1.3',ecdhCurve:'X25519MLKEM768',
   ciphers:'TLS_AES_256_GCM_SHA384', ALPNProtocols:['http/1.1'] }, (req,res) => {
   const chunks = []; let count = 0;
@@ -50,14 +50,14 @@ const server = https.createServer({ cert,key,minVersion:'TLSv1.3',maxVersion:'TL
     }
   });
 });
-server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket));});
+server.on('connection',socket=>{tcpConnections++;sockets.add(socket);socket.once('close',()=>sockets.delete(socket));});
 server.on('secureConnection',()=>secureConnections++);
 server.on('tlsClientError',()=>{});
 server.headersTimeout=5000;server.requestTimeout=10000;server.keepAliveTimeout=1;
 function stop() {
   if(stopped)return;stopped=true;clearTimeout(deadline);
   server.close(()=>{
-    const report={ok:!failed,pid:process.pid,secureConnections,requests,rowSentinel,error:failed};
+    const report={ok:!failed,pid:process.pid,secureConnections,tcpConnections,requests,rowSentinel,error:failed};
     fs.writeFileSync(path.join(config.outputDir,'host.json'),JSON.stringify(report,null,2));
     process.exitCode=failed?1:0;process.stdin.destroy();
   });

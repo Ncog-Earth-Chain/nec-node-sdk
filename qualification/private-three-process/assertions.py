@@ -55,7 +55,10 @@ def assert_complete(root):
     requests = host['requests']
     assert [r['method'] for r in requests] == expected, 'unexpected HTTP method, resend, or negative reached HTTP'
     assert len(requests) == 4 and all(not r['sessionReused'] for r in requests)
-    assert host['secureConnections'] == 5, 'nonmember target opened a host socket, or wrong pin skipped actual TLS'
+    assert host['tcpConnections'] == 5, 'nonmember target opened a host socket, or hidden replacement dial'
+    # Client pin failure can close before the server emits secureConnection;
+    # the client's causal pin error occurs only after actual secureConnect.
+    assert 4 <= host['secureConnections'] <= 5, 'positive actual selected-host TLS missing'
     assert len(ingress['connections']) == 6, 'unexpected replacement/hidden outer channel'
     assert ingress['productionService'] and ingress['trustedFinalizedState'], 'ingress used a substitute authority/server'
     assert ingress['capturedBytes'] > 4096, 'ciphertext capture is absent'
