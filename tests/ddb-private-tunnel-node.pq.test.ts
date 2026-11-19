@@ -47,11 +47,12 @@ async function fixture(curve = 'X25519MLKEM768') {
   return { connection, trusted, options, plaintext, ciphertext, routes, inner, dials: () => dials };
 }
 
-test('opaque selected-host TLS hides private query/token/sidecar/result and consumes one socket', async () => {
+test.each(['ddb_tokenSelect', 'ddb_tokenCallReadProcedure'])('actual bound %s hides private query/token/sidecar/result and consumes one socket', async method => {
   const f = await fixture();
   const channel = await connectDdbNodePrivateRead(f.connection, f.trusted, f.options);
   expect(f.plaintext).toHaveLength(0); expect(channel.negotiatedGroup).toBe('X25519MLKEM768');
-  expect(await channel.send('ddb_tokenSelect', [{ query: 'private-query-sentinel', token: 'private-token-sentinel', sidecar: 'private-sidecar-sentinel' }])).toBe('private-result-sentinel');
+  expect(await channel.send(method, [{ query: 'private-query-sentinel', token: 'private-token-sentinel', sidecar: 'private-sidecar-sentinel' }])).toBe('private-result-sentinel');
+  expect(JSON.parse(f.plaintext[0]).method).toBe(method);
   const observed = Buffer.concat(f.ciphertext).toString('latin1') + JSON.stringify(f.routes);
   for (const secret of ['private-query-sentinel', 'private-token-sentinel', 'private-sidecar-sentinel', 'private-result-sentinel']) expect(observed).not.toContain(secret);
   expect(f.dials()).toBe(1); expect(f.inner).toHaveLength(1); expect(f.inner[0].isSessionReused()).toBe(false);
@@ -74,4 +75,10 @@ test('retained tunnel requires original transaction context and retains original
   const channel = await connectDdbNodePrivateCustody(binding, f.options, { txnId: hash, originalPlacement: f.connection.route });
   expect(f.routes[0]).toMatchObject({ audience: 'retained-original', placementVersion: '0x1', assignmentBlockHash: hash });
   expect(await channel.send('ddb_getPrivateTransactionOutcome', [{ txnId: hash }])).toBe('private-result-sentinel'); expect(f.dials()).toBe(1);
+});
+
+test('actual bound tunneled socket refuses a method outside the closed private allowlist before HTTP', async () => {
+  const f = await fixture(), channel = await connectDdbNodePrivateRead(f.connection, f.trusted, f.options);
+  await expect(channel.send('ddb_submitSignedOp', ['private-request-sentinel'])).rejects.toThrow('private transport');
+  expect(f.plaintext).toHaveLength(0); expect(f.dials()).toBe(1);
 });
