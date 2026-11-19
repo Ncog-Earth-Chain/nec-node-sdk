@@ -1,6 +1,6 @@
 # Exact PlacementManager runtime compatibility
 
-Private transaction BASE/member decoding, trusted-node assignment evidence parsing and stored placement proof verification accept the existing V1 runtime and the exact reviewed V2 runtime with the first-publisher amendment. They use one shared predicate, `isSupportedPlacementManagerRuntime`. The existing `PLACEMENT_MANAGER_RUNTIME_CODE_HASH` remains V1; `PLACEMENT_MANAGER_V2_RUNTIME_CODE_HASH` identifies only the amended V2 bytes.
+Private transaction BASE/member decoding, trusted-node assignment evidence parsing and stored placement proof verification accept the existing V1 runtime, the exact reviewed V2 runtime with the first-publisher amendment, and the separately reviewed V2-A4 runtime. They use one shared predicate, `isSupportedPlacementManagerRuntime`. The existing `PLACEMENT_MANAGER_RUNTIME_CODE_HASH` remains V1; `PLACEMENT_MANAGER_V2_RUNTIME_CODE_HASH` identifies only the original amended V2 bytes. `PLACEMENT_MANAGER_V2_A4_RUNTIME_CODE_HASH` identifies the separate artifact with a staged-new finalization collateral recheck. `isPlacementManagerV2Runtime` classifies the two exact reviewed V2 hashes.
 
 The V2 pin is derived from the node's embedded runtime at `fd5ad9cf5da7eb1a4628311e1e16812d835c1b33`, matching independently reviewed candidate `329876ba305cb8377d2aac2c07c17116e4d0f5fb`. Exact solc 0.8.20, optimizer 10000, Berlin and metadata hash none reproduce the V1 and V2 runtimes. Their prior top-level storage and complete Placement structure are equal. The appended handoff state does not change the placement words authenticated by `verifyPlacementProof`.
 
@@ -11,3 +11,23 @@ The checked-in runtime proof fixture contains actual Merkle Patricia trie proofs
 Current assignment proof mode remains unsupported. Trusted private reads still require the explicit trusted source and authenticated transport; both private feature flags retain their existing behavior. This change adds no custody read, migration, header verification, new trust callback, signing domain or readiness claim.
 
 Qualification cases and remaining boundaries are in [the test ledger](testing/private-sdk-v2-runtime-test-cases.md).
+
+The A4 extension preserves the old constants and proof vectors. Registry proof verification accepts the legacy runtime and `PROVIDER_REGISTRY_A4_RUNTIME_CODE_HASH` by default through `isSupportedProviderRegistryRuntime`. An explicit `registryCodeHash` keeps its existing exclusive, case-insensitive caller-selected comparison: it can admit an arbitrary runtime for that proof call, or refuse a reviewed runtime that differs from the override. It does not add the override to any runtime class. The classification helpers use exact canonical strings and do not normalize identities or replace an observed legacy hash with a new hash.
+
+| Registry runtime | Manager runtime | History/proof layout | Necessary A4 booking runtime guards |
+|---|---|---|---|
+| Legacy | V1 / reviewed old V2 / V2-A4 | Supported layouts | Absent |
+| Guarded A4 | V1 | Supported layouts | Present |
+| Guarded A4 | Reviewed old V2 | Supported layouts | Absent: no staged-new final recheck |
+| Guarded A4 | V2-A4 | Supported layouts | Present |
+| Unknown | Any, or unknown manager | Relevant strict default check refuses | Absent |
+
+`hasA4BookingRuntimeGuards` reports only the last column's exact code tuple. A fresh-action A4 suitability decision also requires complete canonical collateral evidence, manager/registry association and all applicable eligibility and authority checks from the same sealed snapshot. Runtime classification alone establishes none of these. A caller override cannot establish A4 suitability.
+
+`verifyRegistryProof` authenticates the served provider storage words under the caller's trusted root. `verifyPlacementProof` authenticates stored booking words. Neither verifies actual HostBonds balance, canonical module installation and registry association, a sealed consenting set, readiness or future transaction success. A same-root multi-account collateral proof verifier is not built. The quote remains a node-served sealed computation.
+
+For `quotePlacement`, V1 `placeArgs` contain executable `place` calldata, subject to execution-time checks. A V2 target returns empty hex `calldata: '0x'` because the V2 `place` selector always reverts. Its candidate members and replica size must be used through the existing consent/handoff workflow. The SDK preserves the existing `Promise<any>` response shape and forwards the response; it does not invent target-identity RPC fields or submit a transaction.
+
+The new checked-in runtime hex files are exact copies of the accepted Azure compile01 artifacts: registry optimizer runs 10000 (15213 runtime bytes), V2-A4 runs 200 (20252 bytes), solc 0.8.20/Berlin/metadata hash none. The prerequisite is bounded contract-component root decision SHA256 `c8694c1a3340fbb7c314e225b90e56f379e4caa07f6d8fbc95153f6b0a834d9f`. Its acceptance is separate from SDK qualification. The new account proof cases construct synthetic one-account trie leaves around existing storage proofs; they are compatibility fixtures, not an execution or collateral claim.
+
+All new SDK qualification remains **DEFERRED** in [the A4 test ledger](testing/private-sdk-a4-runtime-test-cases.md). The tests-source-first patch records writing order only; no local tests, typecheck, build or mutants were executed.

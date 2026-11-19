@@ -2353,8 +2353,11 @@ export class Ddb {
   }
 
   /**
-   * The group the placement engine WOULD place a contract on in the current sealed epoch (ddb_quotePlacement): every
-   * provider live at the seal, R = all, with the PlacementManager.place calldata. Books nothing.
+   * A candidate placement group for the current sealed epoch (ddb_quotePlacement), R = all. Books nothing.
+   * The answer is node-served sealed computation; SDK
+   * registry/placement proofs do not authenticate its canonical HostBonds installation or free collateral.
+   * PlaceArgs are executable only for a V1 target. A V2 target returns empty calldata ('0x') because its place
+   * selector always reverts; members/size are candidate inputs to the existing consent/handoff workflow.
    */
   quotePlacement(req: { contract: string; owner: string; replicaBytes: string | number | bigint; tier?: 'shared' | 'dedicated' }): Promise<any> {
     return this.call('ddb_quotePlacement', [{ ...req, replicaBytes: '0x' + BigInt(req.replicaBytes).toString(16) }]);
