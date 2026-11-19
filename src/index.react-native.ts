@@ -90,7 +90,7 @@ export type { DdbPrivateAuthority, DdbPrivateEvidenceSource, DdbPrivateAssignmen
 // Common composition only: applications must supply concrete authenticated channels and persistence.
 export { createDdbTrustedPrivatePolicy } from './ddb-private-trust';
 export type { DdbTrustedPrivateOptions, DdbPrivateEvidenceChannel, DdbPrivateHostChannel } from './ddb-private-trust';
-export type { DdbPrivateCustodyBinding, DdbPrivateCustodyPolicy, DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
+export type { DdbPrivateCustodyBinding, DdbPrivateCustodyPolicy, DdbAuthenticatedCustodyTransport, DdbPrivateCustodyContext } from './ddb-private-custody';
 export { createDdbPrivateClient } from './ddb-private-client';
 export type { DdbPrivateClientOptions, DdbPrivatePrepareInput } from './ddb-private-client';
 export {

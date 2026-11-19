@@ -95,7 +95,7 @@ export { createDdbPrivateClient } from './ddb-private-client';
 export type { DdbPrivateClientOptions, DdbPrivatePrepareInput } from './ddb-private-client';
 export { createDdbTrustedNodePrivatePolicy, connectDdbNodePrivateEvidence } from './ddb-private-trust-node';
 export type { DdbTrustedNodePrivateOptions } from './ddb-private-trust-node';
-export type { DdbPrivateCustodyBinding, DdbPrivateCustodyPolicy, DdbAuthenticatedCustodyTransport } from './ddb-private-custody';
+export type { DdbPrivateCustodyBinding, DdbPrivateCustodyPolicy, DdbAuthenticatedCustodyTransport, DdbPrivateCustodyContext } from './ddb-private-custody';
 export { connectDdbNodePrivateCustody } from './ddb-private-custody-node';
 export type { DdbNodeAuthenticatedCustodyTransport } from './ddb-private-custody-node';
 export { createDdbNodePrivateRetryStore } from './ddb-private-retry-node';
@@ -153,3 +153,7 @@ export {
   type DdbPrivateCapabilityAudience, type DdbPrivateCapabilityFields, type DdbPrivateCapabilityToken,
   type BuildDdbPrivateCapabilityOptions, type VerifyDdbPrivateCapabilityOptions,
 } from './ddb-private-capability';
+
+// Node/native-helper ciphertext carrier; selected-host inner TLS remains authoritative.
+export { createDdbNodePrivateTunnelDialer, ownDdbPrivateTunnelRoute, projectDdbPrivateTunnelRoute } from './ddb-private-tunnel-node';
+export type { DdbPrivateTunnelRoute, DdbNodePrivateTunnelOptions, DdbPrivateNodeSocketDialer } from './ddb-private-tunnel-node';
