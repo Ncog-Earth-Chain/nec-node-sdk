@@ -61,6 +61,7 @@ def assert_complete(root):
     assert 4 <= host['secureConnections'] <= 5, 'positive actual selected-host TLS missing'
     assert len(ingress['connections']) == 6, 'unexpected replacement/hidden outer channel'
     assert ingress['productionService'] and ingress['trustedFinalizedState'], 'ingress used a substitute authority/server'
+    assert ingress['ingressPin'] != ingress['selectedPin'], 'outer and selected host share identity key'
     assert ingress['capturedBytes'] > 4096, 'ciphertext capture is absent'
     all_binary, routes = [], []
     for c in ingress['connections']:

@@ -124,7 +124,7 @@ def main():
         endpoint = json.loads(host.marker('NEC93_HOST_READY ',30))
         assert endpoint['pid'] == host.proc.pid
         ingress_config = output/'ingress-config.json'
-        write_json(ingress_config, {'certFile':str(cert),'keyFile':str(key),'selectedURL':endpoint['url'],
+        write_json(ingress_config, {'selectedURL':endpoint['url'],
                                   'selectedPin':endpoint['pin'],'outputDir':str(output)})
         ingress_env = dict(env, NEC93_PRIVATE_THREE_PROCESS_CONFIG=str(ingress_config))
         ingress = Role('ingress',[str(binary),'-test.run=^TestPrivateTunnelThreeProcessIngressHelper$',
@@ -133,12 +133,13 @@ def main():
         ready = json.loads(ingress.marker('NEC93_PROCESS_READY ',60))
         assert ready['pid'] == ingress.proc.pid
         assert ready['productionService'] and ready['trustedFinalizedState']
+        assert ready['ingressPin'] != endpoint['pin'], 'ingress and selected-host keys must differ'
         write_json(output/'ingress-ready.json', ready)
         host.send({'command':'configure','route':ready['route'],'chainId':ready['chainId']})
         host.marker('NEC93_HOST_CONFIGURED',5)
         client_config = output/'client-config.json'
         write_json(client_config, {'certFile':str(cert),'outputDir':str(output),'route':ready['route'],
-                                  'chainId':ready['chainId'],'ingressURL':ready['ingressURL'],
+                                  'chainId':ready['chainId'],'ingressURL':ready['ingressURL'],'ingressCAFile':ready['ingressCAFile'],
                                   'selectedURL':endpoint['url'],'selectedPin':endpoint['pin']})
         client = Role('client',[node,'-r',str(register),str(HERE/'client.cjs'),str(client_config)],env,output)
         roles.append(client)

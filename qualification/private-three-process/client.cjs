@@ -11,7 +11,7 @@ const { createDdbNodePrivateTunnelDialer,projectDdbPrivateTunnelRoute } = requir
 const { buildDdbPrivateCapabilityToken,ddbPrivateCapabilityAudience } = require('../../src/ddb-private-capability.ts');
 const pqModule = require('../../src/noble-post-quantum.js'), ml=(pqModule.default||pqModule).ml_dsa87;
 const config=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-const ca=fs.readFileSync(config.certFile), route=parseDdbCurrentReadRoute(config.route.contract,config.route);
+const ca=fs.readFileSync(config.certFile), ingressCA=fs.readFileSync(config.ingressCAFile), route=parseDdbCurrentReadRoute(config.route.contract,config.route);
 const member=route.members[0], groups=[], cases=[];
 let oneUseRefusals=0,wrongPinError='',refusedTargetError='';
 const hex=b=>'0x'+Buffer.from(b).toString('hex');
@@ -22,9 +22,9 @@ async function open(request,fault) {
   const trusted={route,validatorId:member.validatorId,address:member.address,url:config.selectedURL,tlsKeyHash:pin};
   const options={ca,timeoutMs:5000};
   if(fault==='refusedTarget') {
-    options.socketDialer=createDdbNodePrivateTunnelDialer({ca,timeoutMs:5000,ingressURL:config.ingressURL,
+    options.socketDialer=createDdbNodePrivateTunnelDialer({ca:ingressCA,timeoutMs:5000,ingressURL:config.ingressURL,
       route:{...projectDdbPrivateTunnelRoute(config.chainId,route,member.validatorId),validatorId:'0x2'}});
-  } else options.tunnel={ca,timeoutMs:5000,chainId:config.chainId,ingressURL:config.ingressURL};
+  } else options.tunnel={ca:ingressCA,timeoutMs:5000,chainId:config.chainId,ingressURL:config.ingressURL};
   const actual=await connectDdbNodePrivateRead(request,trusted,options);
   assert.equal(actual.negotiatedGroup,'X25519MLKEM768');
   groups.push(actual.negotiatedGroup);channels.push(actual);
