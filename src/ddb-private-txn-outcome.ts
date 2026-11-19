@@ -214,12 +214,12 @@ function closeTransport(transport: DdbAuthenticatedReadTransport | DdbAuthentica
   if (typeof close === 'function') { try { close.call(transport); } catch { /* Best-effort release; never replace a safe result with endpoint text. */ } }
 }
 
-async function readCaptured(input: DdbPrivateTxnOutcomeReadInput, historicalAddress?: string, custody?: DdbPrivateCustodyPolicy): Promise<DdbPrivateTxnLocalOutcome> {
+async function readCaptured(input: DdbPrivateTxnOutcomeReadInput, historicalAddress?: string, custody?: DdbPrivateCustodyPolicy, originalPlacement?: DdbCurrentReadRoute): Promise<DdbPrivateTxnLocalOutcome> {
   let transport: DdbAuthenticatedReadTransport | DdbAuthenticatedCustodyTransport | undefined;
   let custodyBinding: DdbPrivateCustodyBinding | undefined;
   try {
     if (custody) {
-      const channel = await custody.connect(input.validatorId);
+      const channel = await custody.connect(input.validatorId, originalPlacement ? Object.freeze({ txnId: input.txnId, originalPlacement }) : undefined);
       transport = channel;
       const binding = ownPrivateCustodyBinding(channel?.binding);
       custodyBinding = binding;
@@ -426,7 +426,7 @@ export async function collectDdbPrivateTransactionOutcome(input: DdbPrivateTxnCo
   const durable: DdbPrivateTxnLocalDurable[] = [];
   for (const validatorId of requiredHosts) {
     try {
-      const local = await readCaptured({ ...read, validatorId }, placement.members.find(m => m.validatorId === validatorId)!.address, custody);
+      const local = await readCaptured({ ...read, validatorId }, placement.members.find(m => m.validatorId === validatorId)!.address, custody, placement);
       if (local.state === 'pending') { hosts.push({ validatorId, state: 'pending' }); continue; }
       if (!local.payloads || local.payloads.length !== retained.payloads.length || local.payloads.some((p, i) => hex(p) !== retained.payloads[i])) {
         hosts.push({ validatorId, state: 'unavailable' }); continue;

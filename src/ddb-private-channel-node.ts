@@ -1,7 +1,8 @@
 ﻿import { createHash } from 'crypto';
 import { Agent, request as httpsRequest } from 'https';
 import { isIP } from 'net';
-import { connect as tlsConnect } from 'tls';
+import { checkServerIdentity, connect as tlsConnect, type TLSSocket } from 'tls';
+import type { Duplex } from 'stream';
 import { TextDecoder } from 'util';
 import type { DdbNodePrivateReadTransportOptions } from './ddb-private-read-node';
 
@@ -26,24 +27,35 @@ export async function openPrivateNodeChannel(trustedURL: string, trustedPin: str
   const host = endpoint.hostname.replace(/^\[|\]$/g, '');
   const ca = Array.isArray(options.ca) ? options.ca.map(c => typeof c === 'string' ? c : Buffer.from(c)) :
     typeof options.ca === 'string' || options.ca === undefined ? options.ca : Buffer.from(options.ca as Buffer);
-  const socket = tlsConnect({
+  const abort = new AbortController();
+  let raw: Duplex | undefined;
+  let selectedSocket: TLSSocket | undefined;
+  const deadline = setTimeout(() => {
+    const error = new Error('private read transport deadline exceeded');
+    abort.abort(); raw?.destroy(error); selectedSocket?.destroy(error);
+  }, timeoutMs);
+  deadline.unref();
+  try {
+    if (options.socketDialer) raw = await options.socketDialer(Object.freeze({ url: trustedURL, tlsKeyHash: trustedPin }), abort.signal);
+    if (abort.signal.aborted || raw?.destroyed) throw new Error('private read transport deadline or raw socket closed');
+  } catch (error) { clearTimeout(deadline); raw?.destroy(); throw error; }
+  let socket: TLSSocket;
+  try { socket = selectedSocket = tlsConnect({
+    socket: raw,
     host, port: Number(endpoint.port || 443), servername: isIP(host) ? undefined : host,
     ca, rejectUnauthorized: true, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3',
     // A classical-only server is identified and refused before any private HTTP bytes.
     ecdhCurve: 'X25519MLKEM768:X25519', ciphers: 'TLS_AES_256_GCM_SHA384',
     ALPNProtocols: ['http/1.1'],
-  });
+  }); } catch (error) { clearTimeout(deadline); abort.abort(); raw?.destroy(); throw error; }
   let failure: Error | undefined;
   let agent: Agent | undefined;
   socket.on('error', error => { failure = failure ?? error; });
   socket.on('close', () => { failure = failure ?? new Error('private read channel closed'); });
-  const deadline = setTimeout(() => {
-    failure = new Error('private read transport deadline exceeded');
-    socket.destroy(failure);
-  }, timeoutMs);
-  deadline.unref();
   const close = () => {
     clearTimeout(deadline);
+    abort.abort();
+    raw?.destroy();
     socket.destroy();
     agent?.destroy();
   };
@@ -70,6 +82,8 @@ export async function openPrivateNodeChannel(trustedURL: string, trustedPin: str
               (socket.alpnProtocol && socket.alpnProtocol !== 'http/1.1')) {
             throw new Error('private read transport negotiated an unsupported TLS profile');
           }
+          const nameError = checkServerIdentity(host, socket.getPeerCertificate(true));
+          if (nameError) throw nameError;
           const certificate = socket.getPeerX509Certificate();
           const actualPin = certificate && '0x' + createHash('sha256')
             .update(certificate.publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
@@ -96,6 +110,7 @@ export async function openPrivateNodeChannel(trustedURL: string, trustedPin: str
   let consumed = false;
   return Object.freeze({
     endpointAuthenticated: true as const, confidentiality: 'post-quantum' as const,
+    ...(options.socketDialer ? { noRouteRefresh: true as const } : {}),
     negotiatedGroup: 'X25519MLKEM768' as const, close,
     send: async (method: string, params: any[]): Promise<any> => {
       if (consumed) throw new Error('private read transport already consumed');

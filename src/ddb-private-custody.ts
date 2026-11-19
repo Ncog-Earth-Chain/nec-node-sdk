@@ -1,3 +1,4 @@
+import type { DdbCurrentReadRoute } from './ddb-private-read';
 import { evidenceObject as obj, evidenceFixed as fixed, evidenceRecipient, evidenceOrigin, evidenceFail as fail,
   type DdbPrivateEvidenceSource } from './ddb-private-evidence';
 
@@ -21,9 +22,14 @@ export interface DdbAuthenticatedCustodyTransport {
   send(method: string, params: any[]): Promise<any>;
   close(): void;
 }
+/** Local adapter context captured only after retained BASE and historical membership verification. */
+export interface DdbPrivateCustodyContext {
+  readonly txnId: string;
+  readonly originalPlacement: DdbCurrentReadRoute;
+}
 export interface DdbPrivateCustodyPolicy {
   /** Authenticate current endpoint ownership for this stable ID, independently of resolver claims. */
-  connect(validatorId: number): Promise<DdbAuthenticatedCustodyTransport>;
+  connect(validatorId: number, context?: DdbPrivateCustodyContext): Promise<DdbAuthenticatedCustodyTransport>;
 }
 function integer(value: unknown, positive = true): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < (positive ? 1 : 0)) return fail();

@@ -54,6 +54,8 @@ export interface DdbAuthenticatedReadTransport {
   };
   readonly endpointAuthenticated: true;
   readonly confidentiality: 'post-quantum';
+  /** Opaque single-stream transport never opens a replacement after any response. */
+  readonly noRouteRefresh?: true;
   /** Sends ONLY on the authenticated bound channel; must not redirect, retry or forward to another host. */
   readonly send: RpcSend;
 }
@@ -212,7 +214,7 @@ export async function sendDdbPrivateRead(
       const error = e as { code?: number; data?: { reason?: string; preService?: boolean; home?: number } };
       // Only a structured refusal from the selected authenticated channel guarantees no service.
       // Network errors and post-service route changes never resend this envelope to another host.
-      if (attempt === 0 && error?.code === -32063 && error.data?.reason === 'stale_route' && error.data.preService === true) continue;
+      if (transport.noRouteRefresh !== true && attempt === 0 && error?.code === -32063 && error.data?.reason === 'stale_route' && error.data.preService === true) continue;
       throw e;
     }
   }
