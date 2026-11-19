@@ -19,12 +19,12 @@ const servers: Server[] = [], sockets = new Set<Socket>(), websockets = new Set<
 afterEach(async () => { for (const ws of websockets) ws.terminate(); websockets.clear(); for (const socket of sockets) socket.destroy(); sockets.clear();
   await Promise.all(servers.splice(0).map(s => new Promise<void>(resolve => s.close(() => resolve())))); });
 async function fixture(curve = 'X25519MLKEM768') {
-  const plaintext: string[] = [], ciphertext: Buffer[] = [], routes: any[] = [], inner: TLSSocket[] = [];
+  const plaintext: string[] = [], ciphertext: Buffer[] = [], routes: any[] = [], inner: TLSSocket[] = [], sessionReused: boolean[] = [];
   const host = createServer({ cert, key, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', ecdhCurve: curve, ciphers: 'TLS_AES_256_GCM_SHA384' }, (req, res) => {
     let body = ''; req.on('data', b => { body += b; }); req.on('end', () => { plaintext.push(body); res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: 'private-result-sentinel' })); });
   });
-  host.on('tlsClientError', () => {}); host.on('secureConnection', socket => inner.push(socket));
+  host.on('tlsClientError', () => {}); host.on('secureConnection', socket => { inner.push(socket); sessionReused.push(socket.isSessionReused()); });
   const ingress = createServer({ cert, key, minVersion: 'TLSv1.3' });
   for (const server of [host, ingress]) { servers.push(server); server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); }
@@ -44,7 +44,7 @@ async function fixture(curve = 'X25519MLKEM768') {
   const connection = { route, member: route.members[0], endpoints: [{ scheme: 'https', url, tlsKeyHash: pin }] };
   const trusted = { route, validatorId: 1, address, url, tlsKeyHash: pin };
   const options = { ca: cert, timeoutMs: 2000, tunnel: { chainId: '0x1', ca: cert, ingressURL: `https://127.0.0.1:${(ingress.address() as AddressInfo).port}/ddb/private-tunnel/v1` } };
-  return { connection, trusted, options, plaintext, ciphertext, routes, inner, dials: () => dials };
+  return { connection, trusted, options, plaintext, ciphertext, routes, inner, sessionReused, dials: () => dials };
 }
 
 test.each(['ddb_tokenSelect', 'ddb_tokenCallReadProcedure'])('actual bound %s hides private query/token/sidecar/result and consumes one socket', async method => {
@@ -55,7 +55,7 @@ test.each(['ddb_tokenSelect', 'ddb_tokenCallReadProcedure'])('actual bound %s hi
   expect(JSON.parse(f.plaintext[0]).method).toBe(method);
   const observed = Buffer.concat(f.ciphertext).toString('latin1') + JSON.stringify(f.routes);
   for (const secret of ['private-query-sentinel', 'private-token-sentinel', 'private-sidecar-sentinel', 'private-result-sentinel']) expect(observed).not.toContain(secret);
-  expect(f.dials()).toBe(1); expect(f.inner).toHaveLength(1); expect(f.inner[0].isSessionReused()).toBe(false);
+  expect(f.dials()).toBe(1); expect(f.inner).toHaveLength(1); expect(f.sessionReused).toEqual([false]);
   await expect(channel.send('ddb_signedSelect', [])).rejects.toThrow('already consumed');
 });
 
