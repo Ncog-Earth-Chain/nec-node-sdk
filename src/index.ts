@@ -145,3 +145,11 @@ export { hexToDecimalString, decimalToHex, parseUnits, etherToWeiHex, hexToEther
 export { getAllTransactions, getAllTokens } from './graphql';
 // PRIV-02 (NEC-84): client-side envelope for CONFIDENTIAL columns + recipient-key directory digests.
 export * as confidential from './confidential';
+
+export {
+  DDB_PRIVATE_CAPABILITY_FORMAT, DDB_PRIVATE_CAPABILITY_DOMAIN, normalizeDdbPrivateCapabilityRole,
+  canonicalDdbPrivateCapabilityBytes, canonicalDdbPrivateCapabilityHash, parseDdbPrivateCapabilityToken,
+  buildDdbPrivateCapabilityToken, verifyDdbPrivateCapabilityToken, ddbPrivateCapabilityAudience,
+  type DdbPrivateCapabilityAudience, type DdbPrivateCapabilityFields, type DdbPrivateCapabilityToken,
+  type BuildDdbPrivateCapabilityOptions, type VerifyDdbPrivateCapabilityOptions,
+} from './ddb-private-capability';
