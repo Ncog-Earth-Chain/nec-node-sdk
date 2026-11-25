@@ -18,7 +18,7 @@ function App() {
     (async () => {
       await loadWasm();
       const wallet = await Wallet.create('your-private-key-hex');
-      const provider = new Provider('https://rpc.ncog.earth');
+      const provider = new Provider('http://127.0.0.1:18545');
       const bal = await provider.getBalance(wallet.address);
       setBalance(bal);
     })();
@@ -47,7 +47,7 @@ function App() {
   useEffect(() => {
     (async () => {
       if (window.ncogWallet) {
-        const provider = new Provider('https://rpc.ncog.earth');
+        const provider = new Provider('http://127.0.0.1:18545');
         const signer = new ExtensionSigner(window.ncogWallet, provider);
         const addr = await signer.getAddress();
         setAddress(addr);
@@ -85,7 +85,7 @@ export default function Home() {
     (async () => {
       await loadWasm();
       const wallet = await Wallet.create('your-private-key-hex');
-      const provider = new Provider('https://rpc.ncog.earth');
+      const provider = new Provider('http://127.0.0.1:18545');
       const bal = await provider.getBalance(wallet.address);
       setBalance(bal);
     })();
@@ -112,7 +112,7 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       if (typeof window !== 'undefined' && window.ncogWallet) {
-        const provider = new Provider('https://rpc.ncog.earth');
+        const provider = new Provider('http://127.0.0.1:18545');
         const signer = new ExtensionSigner(window.ncogWallet, provider);
         const addr = await signer.getAddress();
         setAddress(addr);
@@ -148,7 +148,7 @@ function App() {
     (async () => {
       await loadWasm();
       const wallet = await Wallet.create('your-private-key-hex');
-      const provider = new Provider('https://rpc.ncog.earth');
+      const provider = new Provider('http://127.0.0.1:18545');
       const bal = await provider.getBalance(wallet.address);
       setBalance(bal);
     })();
@@ -177,7 +177,7 @@ function App() {
   useEffect(() => {
     (async () => {
       if (window.ncogWallet) {
-        const provider = new Provider('https://rpc.ncog.earth');
+        const provider = new Provider('http://127.0.0.1:18545');
         const signer = new ExtensionSigner(window.ncogWallet, provider);
         const addr = await signer.getAddress();
         setAddress(addr);
@@ -209,7 +209,7 @@ import { Provider, Wallet, ContractFactory } from '@ncog/necjs';
 (async () => {
   await loadWasm();
   const wallet = await Wallet.create('your-private-key-hex');
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const signer = wallet.connect(provider);
 
   // Example ABI and bytecode
@@ -235,7 +235,7 @@ import { Provider, Wallet, ContractFactory } from '@ncog/necjs';
 ```js
 import { Subscription } from '@ncog/necjs';
 
-const wsUrl = 'wss://rpc.ncog.earth';
+const wsUrl = 'ws://127.0.0.1:18546';
 const sub = new Subscription(wsUrl);
 
 await sub.connect();
@@ -276,7 +276,7 @@ to get the schema (db_name) for any schema-scoped call.
 import { Provider, Ddb } from '@ncog/necjs';
 
 (async () => {
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const ddb = new Ddb(provider);
 
   const dbName = Ddb.deriveDbName(contractAddress); // e.g. 'c_0000...abcdef'

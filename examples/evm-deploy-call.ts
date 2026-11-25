@@ -9,7 +9,7 @@
  */
 import { Provider, Wallet, Contract } from 'necjs';
 
-const RPC_URL = 'https://rpc.ncog.earth';
+const RPC_URL = 'http://127.0.0.1:18545';
 const DEPLOYER_PRIVATE_KEY = '0xYOUR_ML_DSA_87_PRIVATE_KEY_HEX';
 
 // Minimal ABI for a simple storage contract: get() view + set(uint256) mutating.

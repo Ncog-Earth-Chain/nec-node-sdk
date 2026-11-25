@@ -8,7 +8,7 @@ const { loadWasm, Provider, Wallet } = require('@ncog/necjs');
 (async () => {
   await loadWasm(); // Required for cryptography
   const wallet = await Wallet.create('your-private-key-hex');
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const balance = await provider.getBalance(wallet.address);
   console.log('Balance:', balance);
 })();
@@ -24,7 +24,7 @@ const { Provider, Wallet, ContractFactory, loadWasm } = require('@ncog/necjs');
 (async () => {
   await loadWasm();
   const wallet = await Wallet.create('your-private-key-hex');
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const signer = wallet.connect(provider);
 
   const abi = [/* ... */];
@@ -42,7 +42,7 @@ const { Provider, Wallet, ContractFactory, loadWasm } = require('@ncog/necjs');
 ```js
 const { Subscription } = require('@ncog/necjs');
 
-const wsUrl = 'wss://rpc.ncog.earth';
+const wsUrl = 'ws://127.0.0.1:18546';
 const sub = new Subscription(wsUrl);
 
 (async () => {
@@ -75,7 +75,7 @@ const { loadWasm, Provider, Wallet, Ddb } = require('@ncog/necjs');
 
 (async () => {
   await loadWasm();
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const ddb = new Ddb(provider);
   const wallet = await Wallet.create('your-private-key-hex');
 

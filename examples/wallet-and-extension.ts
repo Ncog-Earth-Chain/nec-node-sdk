@@ -6,7 +6,7 @@
  */
 import { Provider, Wallet, ExtensionSigner, type InjectedProvider } from 'necjs';
 
-const RPC_URL = 'https://rpc.ncog.earth';
+const RPC_URL = 'http://127.0.0.1:18545';
 const CHAIN_ID = 2479;
 const RECIPIENT = '0x0987654321098765432109876543210987654321';
 

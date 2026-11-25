@@ -87,7 +87,7 @@ console.log(wallet.address);
 
 **Input Parameters:**
 - `hexPrivateKey` (string): Private key in hexadecimal format
-- `providerUrl` (string, optional): RPC URL (defaults to `'http://localhost:8545'`)
+- `providerUrl` (string, optional): RPC URL (defaults to `'http://127.0.0.1:18545'`)
 
 **Response:** Promise<{ signer: Signer, provider: Provider, address: string }> - Object containing signer, provider, and wallet address
 
@@ -95,7 +95,7 @@ console.log(wallet.address);
 ```typescript
 const { signer, provider, address } = await Wallet.connect(
   '0x1234567890abcdef...',
-  'https://rpc.ncog.earth'
+  'http://127.0.0.1:18545'
 );
 ```
 
@@ -232,7 +232,7 @@ import { Provider, Wallet } from '@ncog/necjs';
 const wallet = await Wallet.create('0x1234567890abcdef...');
 
 // Connect to a provider to get a Signer
-const provider = new Provider('https://rpc.ncog.earth');
+const provider = new Provider('http://127.0.0.1:18545');
 const signer = wallet.connect(provider);
 
 // Get wallet address
@@ -260,6 +260,6 @@ const txHash = await signer.sendTransaction({
 // Create wallet, provider, and signer in one call
 const { signer, provider, address } = await Wallet.connect(
   '0x1234567890abcdef...',
-  'https://rpc.ncog.earth'
+  'http://127.0.0.1:18545'
 );
 ```

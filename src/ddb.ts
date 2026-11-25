@@ -1527,7 +1527,7 @@ export function buildDdbSignedReadProcedure(
  *     updateSchema*, callProcedure*, grantRole*, revokeRole*, select, query, getStateAcc.
  *
  * @example
- *   const provider = new Provider('https://rpc.ncog.earth');
+ *   const provider = new Provider('http://127.0.0.1:18545');
  *   const ddb = new Ddb(provider);
  *   // Deploy: the caller signs with their ML-DSA private key; the node derives `from` from that key.
  *   const txHash = await ddb.createSchemaSigned(myPrivKeyHex, 'users', schemaJson);

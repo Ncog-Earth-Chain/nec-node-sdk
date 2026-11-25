@@ -61,12 +61,16 @@ export class Wallet {
   /**
    * Unified connect: creates a Wallet, Provider, and Signer in one call (browser version).
    * @param hexPrivateKey The private key as a hex string.
-   * @param providerUrl The RPC URL (optional, defaults to http://localhost:8545)
+   * @param providerUrl The RPC URL (optional, defaults to http://127.0.0.1:18545)
    * @returns { signer, provider, address }
    */
   static async connect(hexPrivateKey: string, providerUrl?: string): Promise<{ signer: Signer, provider: Provider, address: string }> {
     const wallet = await Wallet.create(hexPrivateKey);
-    const provider = new (await import('./provider')).Provider(providerUrl || 'http://localhost:8545');
+    // 18545, not 8545: DefaultHTTPPort in the node's launcher is 18545
+    // (ncogearthchain/cmd/ncogearthchain/launcher/defaults.go:19). The old default here was
+    // http://127.0.0.1:18545 -- geth's port, which no NCOG node listens on -- so a caller who
+    // omitted providerUrl connected to nothing and got a transport error rather than a clear one.
+    const provider = new (await import('./provider')).Provider(providerUrl || 'http://127.0.0.1:18545');
     const signer = wallet.connect(provider);
     return { signer, provider, address: wallet.address };
   }

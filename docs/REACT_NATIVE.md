@@ -31,7 +31,7 @@ The React Native version includes:
 import { Provider, Contract } from '@ncog/necjs';
 
 // Create a provider
-const provider = new Provider('https://rpc.ncog.earth');
+const provider = new Provider('http://127.0.0.1:18545');
 
 // Create a contract instance
 const contract = new Contract(contractAddress, abi, provider);

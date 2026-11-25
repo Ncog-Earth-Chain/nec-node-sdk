@@ -19,7 +19,7 @@ export class NcogService {
   async init() {
     await loadWasm();
     this.wallet = await Wallet.create('your-private-key-hex');
-    this.provider = new Provider('https://rpc.ncog.earth');
+    this.provider = new Provider('http://127.0.0.1:18545');
   }
 
   async getBalance(): Promise<number> {
@@ -51,7 +51,7 @@ export class ContractService {
   async init() {
     await loadWasm();
     const wallet = await Wallet.create('your-private-key-hex');
-    this.provider = new Provider('https://rpc.ncog.earth');
+    this.provider = new Provider('http://127.0.0.1:18545');
     this.signer = wallet.connect(this.provider);
   }
 
@@ -76,7 +76,7 @@ export class EventService implements OnModuleDestroy {
   private sub: Subscription;
 
   constructor() {
-    this.sub = new Subscription('wss://rpc.ncog.earth');
+    this.sub = new Subscription('ws://127.0.0.1:18546');
     this.init();
   }
 
@@ -116,7 +116,7 @@ export class DdbService {
 
   async init() {
     await loadWasm();
-    this.provider = new Provider('https://rpc.ncog.earth');
+    this.provider = new Provider('http://127.0.0.1:18545');
     this.ddb = new Ddb(this.provider);
     const wallet = await Wallet.create('your-private-key-hex');
     this.privateKey = wallet.privateKey;

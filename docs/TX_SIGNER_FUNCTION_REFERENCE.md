@@ -97,7 +97,7 @@ interface SignOptions {
 ```typescript
 import { Provider, signTransactionMLDSA87, etherToWeiHex } from '@ncog/necjs';
 
-const provider = new Provider('https://rpc.ncog.earth');
+const provider = new Provider('http://127.0.0.1:18545');
 const from = '0x1234567890123456789012345678901234567890';
 
 const signed = await signTransactionMLDSA87(

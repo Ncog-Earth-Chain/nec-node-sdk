@@ -104,7 +104,7 @@ derives `db_name` itself from `contract_address` in the definition), and `getSch
 ## 2. `Ddb` class
 
 ```typescript
-const provider = new Provider('https://rpc.ncog.earth');
+const provider = new Provider('http://127.0.0.1:18545');
 const ddb = new Ddb(provider);
 ```
 
@@ -700,7 +700,7 @@ Both are consensus-critical and pinned by a golden vector against the node's can
 ```typescript
 import { Provider, Ddb, type ContractDefinition } from '@ncog/necjs';
 
-const provider = new Provider('https://rpc.ncog.earth');
+const provider = new Provider('http://127.0.0.1:18545');
 const ddb = new Ddb(provider);
 
 const PRIVATE_KEY = '0x...';                                        // caller's ML-DSA-87 private key

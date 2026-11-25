@@ -141,7 +141,7 @@ export class Provider {
   }
 
   /**
-   * @param url The URL of the JSON-RPC endpoint (e.g., "http://localhost:8545").
+   * @param url The URL of the JSON-RPC endpoint (e.g., "http://127.0.0.1:18545").
    */
   constructor(url: string) {
     if (url.includes('http')) {

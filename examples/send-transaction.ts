@@ -9,7 +9,7 @@
  */
 import { Provider, Wallet, signTransactionMLDSA87, etherToWeiHex } from 'necjs';
 
-const RPC_URL = 'https://rpc.ncog.earth';
+const RPC_URL = 'http://127.0.0.1:18545';
 // NCOG's chainId. You can also fetch it at runtime with provider.getChainId().
 const CHAIN_ID = 2479;
 // Placeholder — DO NOT use in production. Replace with a real ML-DSA-87 private key hex.

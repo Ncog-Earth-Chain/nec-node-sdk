@@ -14,7 +14,7 @@
 import { Provider, Ddb, type DdbRow } from 'necjs';
 
 // --- Placeholders — replace with real values -------------------------------
-const RPC_URL = 'https://rpc.ncog.earth';
+const RPC_URL = 'http://127.0.0.1:18545';
 // A clearly-fake ML-DSA-87 private key placeholder. NEVER commit a real key.
 const PRIVATE_KEY = '0xREPLACE_WITH_YOUR_ML_DSA_87_PRIVATE_KEY';
 // The address the `balances` contract was deployed at.

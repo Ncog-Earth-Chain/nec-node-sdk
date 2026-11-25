@@ -23,7 +23,7 @@ import {
 } from 'necjs';
 
 // --- Placeholders — replace with real values -------------------------------
-const RPC_URL = 'https://rpc.ncog.earth';
+const RPC_URL = 'http://127.0.0.1:18545';
 // A clearly-fake ML-DSA-87 private key placeholder. NEVER commit a real key.
 const PRIVATE_KEY = '0xREPLACE_WITH_YOUR_ML_DSA_87_PRIVATE_KEY';
 // The address this contract will live at (used to derive the db_name for later calls).

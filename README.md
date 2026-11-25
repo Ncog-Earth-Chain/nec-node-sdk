@@ -4,6 +4,24 @@
 
 # NEC BLOCKCHAIN SDK
 
+## RPC endpoints — read this first
+
+Every example below connects to **`http://127.0.0.1:18545`**, a node running on your own machine.
+That is deliberate: it works the moment you have a node, with nothing to sign up for.
+
+**There is no public NCOG RPC endpoint in these docs on purpose.** Earlier versions pointed at
+`https://rpc.ncog.earth`, which does not resolve — it is NXDOMAIN, so every copied example failed
+at DNS. A hostname that does not exist is worse than no hostname, because the reader blames their
+own setup.
+
+To get a node to talk to, see `ncogearthchain/docs/operations/DEMO_RUNBOOK.md` in the chain
+repository: `scripts/run-local-testbed.sh up` brings up a two-validator network with RPC on
+`127.0.0.1:18645` and `:18646`, and a single node serves `18545` by default.
+
+**The port is 18545, not 8545.** `DefaultHTTPPort` is 18545 in the node launcher; 8545 is geth's
+port and no NCOG node listens on it.
+
+
 **The all-in-one JavaScript/TypeScript SDK for building apps on the NCOG Earth Chain.**  
 Supports Node.js, browsers, React, Next.js, Vite, and React Native.  
 Includes post-quantum cryptography, wallet management, contract interaction, extension wallet support, contract deployment, and real-time subscriptions.
@@ -116,7 +134,7 @@ async function basicWalletExample() {
   console.log('Wallet address:', wallet.address);
   
   // Connect to blockchain
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   
   // Get balance
   const balance = await provider.getBalance(wallet.address);
@@ -130,7 +148,7 @@ async function basicWalletExample() {
 import { Provider, Contract } from '@ncog/necjs';
 
 async function contractExample() {
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   
   // Contract ABI and address
   const contractABI = [...];
@@ -151,7 +169,7 @@ async function contractExample() {
 import { Provider, ContractFactory, Wallet } from '@ncog/necjs';
 
 async function deployContract() {
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const wallet = await Wallet.create('0x...');
   const signer = wallet.connect(provider); // ML-DSA-87 signer bound to the provider
   
@@ -175,7 +193,7 @@ import { Provider, ExtensionSigner } from '@ncog/necjs';
 
 async function extensionExample() {
   if (window.ncogWallet) {
-    const provider = new Provider('https://rpc.ncog.earth');
+    const provider = new Provider('http://127.0.0.1:18545');
     const signer = new ExtensionSigner(window.ncogWallet, provider);
     
     const address = await signer.getAddress();
@@ -199,7 +217,7 @@ import { Subscription } from '@ncog/necjs';
 
 async function subscriptionExample() {
   // Subscription takes a WebSocket URL and must be connected before subscribing.
-  const subscription = new Subscription('wss://rpc.ncog.earth');
+  const subscription = new Subscription('ws://127.0.0.1:18546');
   await subscription.connect();
   
   // subscribe(subType, params[], handler) -> resolves to a subscription id.
@@ -258,7 +276,7 @@ function WalletComponent() {
     async function initWallet() {
       await loadWasm();
       const wallet = await Wallet.create('0x...');
-      const provider = new Provider('https://rpc.ncog.earth');
+      const provider = new Provider('http://127.0.0.1:18545');
       
       setAddress(wallet.address);
       const bal = await provider.getBalance(wallet.address);
@@ -283,7 +301,7 @@ function WalletComponent() {
 import { Provider, Ddb } from '@ncog/necjs';
 
 async function ddbExample(privateKeyHex, contractDefinition, contractAddress) {
-  const provider = new Provider('https://rpc.ncog.earth');
+  const provider = new Provider('http://127.0.0.1:18545');
   const ddb = new Ddb(provider);
   
   // Writes are signed CLIENT-SIDE with your ML-DSA-87 key and flow through the

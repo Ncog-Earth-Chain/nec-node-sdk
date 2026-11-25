@@ -55,7 +55,7 @@ type ProviderResponseMiddleware = (response: any, payload: any) => Promise<any> 
 **Description:** Creates a new Provider instance for JSON-RPC communication.
 
 **Input Parameters:**
-- `url` (string): The URL of the JSON-RPC endpoint (e.g., "http://localhost:8545")
+- `url` (string): The URL of the JSON-RPC endpoint (e.g., "http://127.0.0.1:18545")
 
 **Response:** Creates a new Provider instance
 
