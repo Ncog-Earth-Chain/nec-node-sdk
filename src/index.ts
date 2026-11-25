@@ -157,3 +157,12 @@ export {
 // Node/native-helper ciphertext carrier; selected-host inner TLS remains authoritative.
 export { createDdbNodePrivateTunnelDialer, ownDdbPrivateTunnelRoute, projectDdbPrivateTunnelRoute } from './ddb-private-tunnel-node';
 export type { DdbPrivateTunnelRoute, DdbNodePrivateTunnelOptions, DdbPrivateNodeSocketDialer } from './ddb-private-tunnel-node';
+
+// Window anchoring (docs/design/anchor-commitment-hierarchy.md in the chain repository): verify that an
+// operation is included in a window the chain anchored, without trusting the node that served the proof.
+export {
+  anchorLeafHash, anchorNodeHash, anchorEmptyRoot, anchorServiceEmpty, anchorServiceHash,
+  anchorMerkleRoot, verifyAnchorInclusion, anchorWindowRoot, anchorEndorsementHash, verifyAnchorProof,
+  ANCHOR_HIERARCHY_VERSION, ANCHOR_KIND_DDB, ANCHOR_KIND_STORAGE, ANCHOR_KIND_COMPUTE, ANCHOR_KIND_AI,
+} from './anchor';
+export type { AnchorHash, AnchorServiceCommitment, AnchorWindowHeader, AnchorInclusionProof } from './anchor';
