@@ -41,6 +41,26 @@ export interface DdbProcedureDef {
   role_required?: string;
   /** present => POINT op (per-row parallelism eligible); absent => predicate op (coarse table lane) */
   point_write?: DdbPointWrite;
+  /**
+   * A procedure that RETURNS ROWS and may not write. It is what makes `SETOF` / `TABLE(...)` return types
+   * legal, and it is called through {@link Ddb.callReadProcedure} (or {@link Ddb.signedCallReadProcedure} on
+   * a contract that declares a reader role) rather than {@link Ddb.callProcedureSigned}: `ddb_callProcedure`
+   * is a TRANSACTION on the consensus path, so a result set produced there has nowhere to go and is
+   * discarded at commit. A read-only procedure runs node-locally, off consensus, in a READ ONLY transaction.
+   *
+   * This is the only way to declare a relational JOIN that returns its result set. The field was already
+   * carried by the chain's contract JSON (ddbschema.Procedure.ReadOnly, `json:"read_only,omitempty"`) and by
+   * this SDK's private-transaction codec (ddb-private-txn.ts, which encodes and checks it), and was missing
+   * only from this public interface -- so a caller building a ContractDefinition out of the SDK's own types
+   * could not express a row-returning query at all, which is the database's headline capability.
+   *
+   * The node enforces the restriction three times over, because a "read-only" procedure that could write
+   * would be a write that never reached a quorum: the body is refused at validation if it mutates, the
+   * function is emitted STABLE so Postgres itself refuses mutation inside it, and it executes in a READ ONLY
+   * transaction. The first is a deny-list and could miss something; the other two are Postgres enforcing its
+   * own rules, which is why they are there and not merely belt-and-braces.
+   */
+  read_only?: boolean;
 }
 
 export interface DdbColumnDef {
