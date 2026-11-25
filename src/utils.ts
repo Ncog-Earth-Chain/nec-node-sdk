@@ -240,8 +240,19 @@ export function normalizeResponse(
   if (resp === null) return {};
   if (typeof resp === 'boolean') return resp;
   if (typeof resp === 'string') {
+    // Addresses, hashes and long data pass through unchanged.
     if (/^0x[a-fA-F0-9]{40,}$/.test(resp)) return resp;
-    return hexToDecimalString(resp);
+    // A hex QUANTITY becomes a decimal string.
+    if (/^0x[0-9a-fA-F]+$/.test(resp)) return hexToDecimalString(resp);
+    // Anything else is a plain string and is returned as it came.
+    //
+    // This branch used to fall through to hexToDecimalString, which THROWS on a non-hex string -- so
+    // every JSON-RPC method whose result is text crashed the provider instead of returning. That
+    // includes `web3_clientVersion`, which is the first call a new integrator makes to check they are
+    // talking to the right chain, and `net_version`. Found by running the quickstart against the live
+    // endpoint with a clean install of the published package rather than writing it from memory:
+    //   Error: hexToDecimalString: invalid hex string "ncogearthchain/v1.0.2-rc.5-.../go1.26.8"
+    return resp;
   }
   if (Array.isArray(resp)) {
     return resp.map((v) =>
