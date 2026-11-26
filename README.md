@@ -75,6 +75,13 @@ Includes post-quantum cryptography, wallet management, contract interaction, ext
 
 ## Setup & Installation
 
+### New here? Start with the quickstart
+
+**[QUICKSTART.md](QUICKSTART.md)** — fifteen minutes from `npm install` to a signed transaction on a
+live chain and a relational JOIN against the decentralized database. Every command and output in it
+came from one real run, including the two `provider.rpc` edges you need to know about before you move
+money.
+
 ### Prerequisites
 
 - Node.js >= 16.0.0
