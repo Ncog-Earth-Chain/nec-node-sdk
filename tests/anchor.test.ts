@@ -30,8 +30,11 @@ const GO = {
   root5: '0x41f3e0f6376877a69ee328ac74ec9d422c60a2bb0ca8ce56b589c041710e54d8',
   ddbServiceRoot: '0x95577f9bb52c4561412368d64ea86b3f958c03955c641d3455fa271b6cce560b',
   storageServiceRoot: '0x08a57b3b89b02fcf954327770af0fe5a6aa7212894ec89de40fe51b1eaee0be8',
-  windowRoot: '0xf3fe93e7d11cff3389501558b6f58d34414c730154df40c9f7ae526143f33cc5',
-  endorsement: '0x9f74b35892b35c5684b1cb4df980101a1195d02ba2a9e95008ea7b2f51195dba',
+  windowRoot: '0x0e261484676c6bd2e6a7dced7070f8710a668b75cd8e88f72e4342f43f2d9c74',
+  // Version 2: the digest now binds the network id and the approve/reject bit, so a REJECTION has a
+  // different digest -- which is the point of binding the bit. Both are pinned.
+  endorsement: '0x48ec026506818ca710337c97e18233ff8baec1e86018a9de40ba7e58092b6883',
+  endorsementReject: '0x692c2da3e21f8ff3bb0f4819dcdfe0bf532eb251b8d42f9fb230f4560e154caf',
   path1: [
     '0x88b56b090f017f7d79008f2cff26b2c8e0bec06d387fcc4f01348d4b01cc738f',
     '0x1e056861dbb57e3e2c28d970265b53b1bf84c7d992071412753c92c4a3745d64',
@@ -72,7 +75,12 @@ describe('anchor digests match the node byte for byte', () => {
     expect(anchorMerkleRoot(leaves('unit1'))).toBe(GO.storageServiceRoot);
     const root = anchorWindowRoot(header(), services());
     expect(root).toBe(GO.windowRoot);
-    expect(anchorEndorsementHash(root, 7, 42)).toBe(GO.endorsement);
+    expect(anchorEndorsementHash(root, 7, 42, 2479, true)).toBe(GO.endorsement);
+    // A rejection must NOT share the approval's digest, or a refusal verifies as a quorum.
+    expect(anchorEndorsementHash(root, 7, 42, 2479, false)).toBe(GO.endorsementReject);
+    expect(anchorEndorsementHash(root, 7, 42, 2479, false)).not.toBe(GO.endorsement);
+    // And another chain of this project must not share it either.
+    expect(anchorEndorsementHash(root, 7, 42, 2480, true)).not.toBe(GO.endorsement);
   });
 
   it('reproduces the node’s inclusion path', () => {

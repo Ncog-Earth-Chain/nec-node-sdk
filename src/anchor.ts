@@ -21,7 +21,7 @@ export const ANCHOR_KIND_COMPUTE = 3;
 export const ANCHOR_KIND_AI = 4;
 
 /** The hierarchy version these functions implement. A node anchoring another version is not verifiable here. */
-export const ANCHOR_HIERARCHY_VERSION = 1;
+export const ANCHOR_HIERARCHY_VERSION = 2;
 
 // == Go's anchorLeafTag / anchorNodeTag / anchorServiceTag / anchorEmptyTag / anchorWindowTag /
 // anchorEndorseTag. A change to any of these is a consensus change on the node side and a client break
@@ -205,9 +205,33 @@ export function anchorWindowRoot(h: AnchorWindowHeader, services: AnchorServiceC
   )));
 }
 
-/** == Go WindowEndorsementHash: what a committee member signs, bound to its epoch and window. */
-export function anchorEndorsementHash(root: AnchorHash, epoch: bigint | number, windowId: bigint | number): AnchorHash {
-  return toHash(keccak_256(cat(TAG_ENDORSE, fromHash(root), u64be(epoch), u64be(windowId))));
+/**
+ * == Go WindowEndorsementHash: what a committee member signs.
+ *
+ * Bound to the window's root, its epoch and id, **the network id, and the approve/reject bit**. The last
+ * two arrived with hierarchy version 2, after an adversarial review found them missing: without the bit a
+ * member's REJECTION signature was byte-identical to its approval, so flipping one unsigned byte on the
+ * wire turned a refusal into a quorum; without the network id, an endorsement produced by the same
+ * committee on another chain of this project verified here.
+ *
+ * So a rejection has a DIFFERENT digest from an approval. Pass `approved` for the signature you are
+ * checking, not for the verdict you hope for.
+ */
+export function anchorEndorsementHash(
+  root: AnchorHash,
+  epoch: bigint | number,
+  windowId: bigint | number,
+  networkId: bigint | number,
+  approved: boolean,
+): AnchorHash {
+  return toHash(keccak_256(cat(
+    TAG_ENDORSE,
+    fromHash(root),
+    u64be(epoch),
+    u64be(windowId),
+    u64be(networkId),
+    new Uint8Array([approved ? 1 : 0]),
+  )));
 }
 
 /** A complete proof that one operation is in an anchored window (hierarchy §6). */
